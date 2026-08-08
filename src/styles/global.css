@@ -1,0 +1,124 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+
+  :root.dark {
+    color-scheme: dark;
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply select-none bg-slate-100 text-slate-700 antialiased dark:bg-night-900 dark:text-slate-200;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply rounded-2xl border border-slate-900/10 bg-white/70 shadow-glass-light backdrop-blur-glass dark:border-white/10 dark:bg-white/5 dark:shadow-glass;
+  }
+
+  .glass-sm {
+    @apply rounded-xl border border-slate-900/10 bg-white/70 shadow-glass-sm-light backdrop-blur-glass dark:border-white/10 dark:bg-white/5 dark:shadow-glass-sm;
+  }
+
+  .glass-hover {
+    @apply transition-colors duration-150 hover:border-accent/40 hover:bg-white dark:hover:bg-white/10;
+  }
+}
+
+@layer utilities {
+  .text-glow {
+    text-shadow: 0 0 14px rgba(59, 130, 246, 0.55);
+  }
+
+  .animate-page-in {
+    animation: page-in 180ms ease-out both;
+  }
+
+  .animate-overlay-in {
+    animation: overlay-in 150ms ease-out both;
+  }
+
+  .animate-dialog-in {
+    animation: dialog-in 180ms ease-out both;
+  }
+
+  .animate-pop-in {
+    animation: pop-in 160ms ease-out both;
+  }
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes pop-in {
+  0% {
+    transform: scale(0.5);
+  }
+  70% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-page-in,
+  .animate-overlay-in,
+  .animate-dialog-in,
+  .animate-pop-in {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
+}
