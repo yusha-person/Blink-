@@ -98,7 +98,7 @@ export default function NoteTags({
             placeholder={tags.length === 0 ? "Add tag…" : "+"}
             list={datalistId}
             disabled={busy}
-            className="w-20 select-text rounded-full border border-transparent bg-transparent px-2 py-0.5 text-xs text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-accent/40 focus:bg-slate-900/5 disabled:opacity-60 dark:text-slate-200 dark:focus:bg-white/5"
+            className="w-20 select-text rounded-full border border-transparent bg-transparent px-2 py-0.5 text-xs text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-accent/40 focus:bg-surface disabled:opacity-60 dark:text-slate-200"
           />
           <datalist id={datalistId}>
             {suggestions.map((name) => (

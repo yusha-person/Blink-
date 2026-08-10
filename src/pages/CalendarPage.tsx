@@ -56,13 +56,13 @@ const DayCell = memo(function DayCell({
       className={`flex min-h-20 flex-col rounded-xl border p-2 text-left transition-colors ${
         isSelected
           ? "border-accent/50 bg-accent/10"
-          : "border-slate-900/5 hover:border-accent/30 hover:bg-accent/5 dark:border-white/5"
+          : "border-border hover:border-accent/30 hover:bg-accent/5"
       } ${isFuture ? "opacity-50" : ""}`}
     >
       <span
         className={`text-xs font-semibold ${
           isToday
-            ? "flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white"
+            ? "flex h-5 w-5 items-center justify-center rounded-full bg-accent text-accent-text"
             : isSelected
               ? "text-accent"
               : "text-slate-700 dark:text-slate-300"
@@ -325,7 +325,7 @@ export default function CalendarPage() {
                       </div>
                       {detail.journal.written ? (
                         <>
-                          <div className="max-h-72 overflow-y-auto rounded-lg border border-slate-900/5 p-3 dark:border-white/5">
+                          <div className="max-h-72 overflow-y-auto rounded-lg border border-border p-3">
                             <MarkdownPreview content={detail.journal.content} />
                           </div>
                           <p className="text-[11px] text-slate-400 dark:text-slate-500">

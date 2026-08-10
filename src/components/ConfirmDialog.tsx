@@ -25,7 +25,7 @@ export default function ConfirmDialog({
 
   return (
     <div
-      className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4"
       onClick={onCancel}
       role="dialog"
       aria-modal="true"

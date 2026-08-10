@@ -2,7 +2,7 @@ import DataSettings from "../components/DataSettings";
 import GoalSettings from "../components/GoalSettings";
 import PrivacySettings from "../components/PrivacySettings";
 import { SettingsRow, SettingsSection } from "../components/SettingsSection";
-import ThemeToggle from "../components/ThemeToggle";
+import ThemePicker from "../components/ThemePicker";
 
 export default function SettingsPage() {
   return (
@@ -13,9 +13,9 @@ export default function SettingsPage() {
       </header>
 
       <SettingsSection title="Appearance" description="Theme and visual preferences.">
-        <SettingsRow label="Theme" description="Dark is the default; switch to light mode anytime.">
-          <ThemeToggle />
-        </SettingsRow>
+        <div className="p-4">
+          <ThemePicker />
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Goals" description="Daily point targets that drive your streak.">

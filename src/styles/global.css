@@ -4,18 +4,26 @@
 
 @layer base {
   :root {
-    color-scheme: light;
+    color-scheme: dark;
     font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
   }
 
-  :root.dark {
-    color-scheme: dark;
+  :root[data-theme="light"] {
+    color-scheme: light;
   }
 
   * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-property: background-color, border-color, color;
+    transition-duration: 180ms;
+    transition-timing-function: ease;
   }
 
   html,
@@ -25,27 +33,54 @@
   }
 
   body {
-    @apply select-none bg-slate-100 text-slate-700 antialiased dark:bg-night-900 dark:text-slate-200;
+    @apply select-none bg-background text-text antialiased;
+  }
+
+  ::selection {
+    background: var(--selection);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+  }
+
+  html {
+    scrollbar-color: rgb(var(--scrollbar-thumb)) rgb(var(--scrollbar-track));
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--scrollbar-thumb));
+    border-radius: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: rgb(var(--scrollbar-track));
   }
 }
 
 @layer components {
   .glass {
-    @apply rounded-2xl border border-slate-900/10 bg-white/70 shadow-glass-light backdrop-blur-glass dark:border-white/10 dark:bg-white/5 dark:shadow-glass;
+    @apply rounded-2xl border border-border bg-surface/70 shadow-glass backdrop-blur-glass;
   }
 
   .glass-sm {
-    @apply rounded-xl border border-slate-900/10 bg-white/70 shadow-glass-sm-light backdrop-blur-glass dark:border-white/10 dark:bg-white/5 dark:shadow-glass-sm;
+    @apply rounded-xl border border-border bg-surface/70 shadow-glass-sm backdrop-blur-glass;
   }
 
   .glass-hover {
-    @apply transition-colors duration-150 hover:border-accent/40 hover:bg-white dark:hover:bg-white/10;
+    @apply transition-colors duration-150 hover:border-accent/40 hover:bg-surface-hover;
   }
 }
 
 @layer utilities {
   .text-glow {
-    text-shadow: 0 0 14px rgba(59, 130, 246, 0.55);
+    text-shadow: 0 0 14px color-mix(in srgb, rgb(var(--accent)) 55%, transparent);
   }
 
   .animate-page-in {

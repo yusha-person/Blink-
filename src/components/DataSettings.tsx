@@ -10,7 +10,7 @@ const dangerButtonClass =
   "rounded-lg border border-red-400/40 bg-red-500/15 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-500/25 disabled:opacity-60 dark:text-red-400";
 
 const selectClass =
-  "w-56 select-text rounded-lg border border-slate-900/10 bg-white/60 px-2.5 py-1.5 text-sm text-slate-800 outline-none transition-colors focus:border-accent/50 dark:border-white/10 dark:bg-white/5 dark:text-slate-100";
+  "w-56 select-text rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-slate-800 outline-none transition-colors focus:border-accent/50";
 
 type PendingReset = "statistics" | "xp" | null;
 

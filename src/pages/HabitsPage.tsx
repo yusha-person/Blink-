@@ -27,7 +27,7 @@ const HabitCard = memo(function HabitCard({
       <span
         className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition-colors ${
           habit.completed
-            ? "border-accent bg-accent text-white"
+            ? "border-accent bg-accent text-accent-text"
             : "border-slate-400/50 text-transparent dark:border-slate-500/50"
         }`}
       >
@@ -50,7 +50,7 @@ const HabitCard = memo(function HabitCard({
         className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
           habit.completed
             ? "bg-accent/20 text-accent"
-            : "bg-slate-900/5 text-slate-500 dark:bg-white/10 dark:text-slate-400"
+            : "bg-surface text-muted"
         }`}
       >
         +{habit.points}

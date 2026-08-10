@@ -3,7 +3,7 @@ import { useGoalStore } from "../stores/goalStore";
 import { SettingsRow } from "./SettingsSection";
 
 const inputClass =
-  "w-20 select-text rounded-lg border border-slate-900/10 bg-white/60 px-2.5 py-1.5 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-accent/50 dark:border-white/10 dark:bg-white/5 dark:text-slate-100";
+  "w-20 select-text rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-accent/50";
 
 const buttonClass =
   "glass-sm glass-hover px-3 py-1.5 text-xs font-medium text-accent disabled:opacity-60";

@@ -47,7 +47,7 @@ const baseComponents: Components = {
     </blockquote>
   ),
   pre: ({ children }) => (
-    <pre className="my-2 overflow-x-auto rounded-lg border border-slate-900/10 bg-slate-900/5 p-3 font-mono text-xs leading-relaxed first:mt-0 last:mb-0 dark:border-white/10 dark:bg-black/40">
+    <pre className="my-2 overflow-x-auto rounded-lg border border-border bg-code p-3 font-mono text-xs leading-relaxed first:mt-0 last:mb-0">
       {children}
     </pre>
   ),
@@ -55,7 +55,7 @@ const baseComponents: Components = {
     className?.includes("language-") ? (
       <code className={className}>{children}</code>
     ) : (
-      <code className="rounded bg-slate-900/5 px-1 py-0.5 font-mono text-xs dark:bg-white/10">
+      <code className="rounded bg-code px-1 py-0.5 font-mono text-xs">
         {children}
       </code>
     ),
@@ -70,7 +70,7 @@ const baseComponents: Components = {
     </div>
   ),
   th: ({ children }) => (
-    <th className="border border-slate-900/10 bg-slate-900/5 px-2 py-1 text-left font-semibold dark:border-white/10 dark:bg-white/5">
+    <th className="border border-slate-900/10 bg-slate-900/5 px-2 py-1 text-left font-semibold">
       {children}
     </th>
   ),

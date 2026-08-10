@@ -7,6 +7,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { useThemeStore } from "../stores/themeStore";
+import { getTheme } from "../styles/themes";
 import type { XpBucket } from "../utils/statistics";
 
 type ChartTooltipProps = {
@@ -36,8 +38,10 @@ type XpBarChartProps = {
 };
 
 export const XpBarChart = memo(function XpBarChart({ data, height = 220, unit = "XP" }: XpBarChartProps) {
+  const theme = useThemeStore((s) => s.theme);
+  const barColor = getTheme(theme).chartPalette[0];
   return (
-    <div className="text-slate-500 dark:text-slate-400" style={{ height }}>
+    <div className="text-muted" style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
           <XAxis
@@ -58,7 +62,7 @@ export const XpBarChart = memo(function XpBarChart({ data, height = 220, unit = 
             content={<ChartTooltip unit={unit} />}
             cursor={{ fill: "currentColor", opacity: 0.08 }}
           />
-          <Bar dataKey="xp" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={40} />
+          <Bar dataKey="xp" fill={barColor} radius={[4, 4, 0, 0]} maxBarSize={40} />
         </BarChart>
       </ResponsiveContainer>
     </div>

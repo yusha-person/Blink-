@@ -11,14 +11,14 @@ export function ProgressBar({ value, max, marker, className }: ProgressBarProps)
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   const markerPct = marker !== undefined && max > 0 ? Math.min(100, (marker / max) * 100) : undefined;
   return (
-    <div className={`relative h-2.5 w-full overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/10 ${className ?? ""}`}>
+    <div className={`relative h-2.5 w-full overflow-hidden rounded-full bg-text/10 ${className ?? ""}`}>
       <div
         className="h-full rounded-full bg-accent transition-all duration-300"
         style={{ width: `${pct}%` }}
       />
       {markerPct !== undefined && (
         <div
-          className="absolute top-0 h-full w-0.5 bg-slate-900/40 dark:bg-white/50"
+          className="absolute top-0 h-full w-0.5 bg-muted"
           style={{ left: `${markerPct}%` }}
         />
       )}

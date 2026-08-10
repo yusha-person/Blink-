@@ -202,7 +202,7 @@ export default function NoteEditor({
             onChange={(e) => setUnlockPassword(e.target.value)}
             placeholder="Master password"
             autoComplete="current-password"
-            className="w-48 select-text rounded-lg border border-slate-900/10 bg-white/60 px-2.5 py-1.5 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-accent/50 dark:border-white/10 dark:bg-white/5 dark:text-slate-100"
+            className="w-48 select-text rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-accent/50"
           />
           <button
             type="submit"
@@ -279,7 +279,7 @@ export default function NoteEditor({
             onBlur={() => void flush()}
             placeholder="Untitled"
             readOnly={trashed}
-            className="min-w-0 flex-1 select-text rounded-lg bg-transparent px-2 py-1 text-lg font-semibold text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:bg-slate-900/5 read-only:text-slate-500 dark:text-slate-100 dark:focus:bg-white/5 dark:read-only:text-slate-400"
+            className="min-w-0 flex-1 select-text rounded-lg bg-transparent px-2 py-1 text-lg font-semibold text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:bg-surface read-only:text-slate-500 dark:text-slate-100 dark:read-only:text-slate-400"
           />
           {!trashed && (
             <button

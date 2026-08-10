@@ -2,7 +2,7 @@ import { memo } from "react";
 import type { HeatmapLevel, HeatmapWeek } from "../utils/statistics";
 
 const CELL_CLASSES: Record<HeatmapLevel, string> = {
-  0: "bg-slate-900/10 dark:bg-white/5",
+  0: "bg-text/10",
   1: "bg-accent/25",
   2: "bg-accent/45",
   3: "bg-accent/70",

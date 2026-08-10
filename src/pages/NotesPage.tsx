@@ -277,7 +277,7 @@ export default function NotesPage() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search notes…"
-              className="w-full select-text rounded-lg border border-slate-900/10 bg-white/60 py-1.5 pl-8 pr-2 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-accent/50 dark:border-white/10 dark:bg-white/5 dark:text-slate-100"
+              className="w-full select-text rounded-lg border border-border bg-surface py-1.5 pl-8 pr-2 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-accent/50"
             />
           </div>
           <button

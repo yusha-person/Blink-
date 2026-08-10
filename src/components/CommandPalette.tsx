@@ -106,13 +106,11 @@ export default function CommandPalette() {
       },
       {
         id: "toggle-theme",
-        title: theme === "dark" ? "Switch to Light Theme" : "Switch to Dark Theme",
+        title: "Change Theme",
         section: "Actions",
-        keywords: "theme dark light appearance toggle",
-        icon: theme === "dark" ? SunIcon : MoonIcon,
-        run: async () => {
-          await useThemeStore.getState().setTheme(theme === "dark" ? "light" : "dark");
-        },
+        keywords: "theme dark light appearance color picker",
+        icon: theme === "light" ? SunIcon : MoonIcon,
+        run: () => navigate("/settings"),
       },
     ];
     if (privacyStatus?.passwordSet && privacyStatus.unlocked) {

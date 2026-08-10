@@ -19,7 +19,7 @@ export default function OverlayDialog({
 
   return (
     <div
-      className="animate-overlay-in fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 pt-24"
+      className="animate-overlay-in fixed inset-0 z-50 flex items-start justify-center bg-overlay p-4 pt-24"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
