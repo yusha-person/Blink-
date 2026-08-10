@@ -28,6 +28,24 @@ export default function App() {
     void hydrateGoals();
   }, [hydrateTheme, hydrateHabits, hydrateJournal, hydrateGoals]);
 
+  useEffect(() => {
+    const checkDayChange = () => {
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      const entryDate = useJournalStore.getState().todayEntry?.date;
+      if (entryDate && entryDate !== today) {
+        void useJournalStore.getState().hydrate();
+        void useHabitStore.getState().hydrate();
+      }
+    };
+    const interval = setInterval(checkDayChange, 30_000);
+    window.addEventListener("focus", checkDayChange);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", checkDayChange);
+    };
+  }, []);
+
   return (
     <HashRouter>
       <Routes>
