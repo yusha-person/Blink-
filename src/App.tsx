@@ -4,6 +4,7 @@ import AppLayout from "./layouts/AppLayout";
 import DashboardPage from "./pages/DashboardPage";
 import HabitsPage from "./pages/HabitsPage";
 import NotesPage from "./pages/NotesPage";
+import TasksPage from "./pages/TasksPage";
 import CalendarPage from "./pages/CalendarPage";
 import JournalPage from "./pages/JournalPage";
 import AchievementsPage from "./pages/AchievementsPage";
@@ -12,6 +13,7 @@ import { useThemeStore } from "./stores/themeStore";
 import { useHabitStore } from "./stores/habitStore";
 import { useJournalStore } from "./stores/journalStore";
 import { useGoalStore } from "./stores/goalStore";
+import { useFontStore } from "./stores/fontStore";
 
 const StatisticsPage = lazy(() => import("./pages/StatisticsPage"));
 
@@ -20,13 +22,15 @@ export default function App() {
   const hydrateHabits = useHabitStore((s) => s.hydrate);
   const hydrateJournal = useJournalStore((s) => s.hydrate);
   const hydrateGoals = useGoalStore((s) => s.hydrate);
+  const hydrateFonts = useFontStore((s) => s.hydrate);
 
   useEffect(() => {
     void hydrateTheme();
     void hydrateHabits();
     void hydrateJournal();
     void hydrateGoals();
-  }, [hydrateTheme, hydrateHabits, hydrateJournal, hydrateGoals]);
+    void hydrateFonts();
+  }, [hydrateTheme, hydrateHabits, hydrateJournal, hydrateGoals, hydrateFonts]);
 
   useEffect(() => {
     const checkDayChange = () => {
@@ -52,6 +56,7 @@ export default function App() {
         <Route element={<AppLayout />}>
           <Route index element={<DashboardPage />} />
           <Route path="habits" element={<HabitsPage />} />
+          <Route path="tasks" element={<TasksPage />} />
           <Route path="notes" element={<NotesPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route

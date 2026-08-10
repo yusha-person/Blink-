@@ -12,6 +12,7 @@ import {
   NotesIcon,
   SettingsIcon,
   StatisticsIcon,
+  TasksIcon,
 } from "../components/icons";
 
 type NavItem = {
@@ -23,6 +24,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { to: "/", label: "Dashboard", icon: DashboardIcon },
   { to: "/habits", label: "Habits", icon: HabitsIcon },
+  { to: "/tasks", label: "Tasks", icon: TasksIcon },
   { to: "/notes", label: "Notes", icon: NotesIcon },
   { to: "/calendar", label: "Calendar", icon: CalendarIcon },
   { to: "/statistics", label: "Statistics", icon: StatisticsIcon },

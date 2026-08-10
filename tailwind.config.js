@@ -73,8 +73,9 @@ export default {
         glass: "14px",
       },
       fontFamily: {
-        sans: ['"Segoe UI"', "system-ui", "-apple-system", "sans-serif"],
+        sans: ["var(--font-app)", "system-ui", "sans-serif"],
         mono: ['"Cascadia Code"', '"JetBrains Mono"', "Consolas", "monospace"],
+        editor: ["var(--font-editor)", "var(--font-app)", "system-ui", "sans-serif"],
       },
     },
   },

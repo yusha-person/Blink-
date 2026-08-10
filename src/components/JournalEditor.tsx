@@ -161,7 +161,7 @@ export default function JournalEditor({ entry }: { entry: JournalEntry }) {
           onBlur={() => void flush()}
           placeholder="Reflect on your day in Markdown…"
           spellCheck
-          className="flex-1 resize-none select-text bg-transparent p-4 font-mono text-sm leading-relaxed text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100"
+          className="flex-1 resize-none select-text bg-transparent p-4 font-editor text-sm leading-relaxed text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100"
         />
       ) : (
         <div className="flex-1 overflow-y-auto p-4">

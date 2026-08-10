@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import NoteEditor from "../components/NoteEditor";
+import FolderDialog from "../components/FolderDialog";
+import DeleteFolderDialog from "../components/DeleteFolderDialog";
+import FolderTree, { NOTE_DRAG_TYPE } from "../components/FolderTree";
 import {
-  FolderIcon,
   LockIcon,
   NotesIcon,
   PlusIcon,
@@ -72,6 +74,11 @@ function NoteListItem({
     <button
       type="button"
       onClick={onClick}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(NOTE_DRAG_TYPE, String(note.id));
+        e.dataTransfer.effectAllowed = "move";
+      }}
       className={`glass-sm glass-hover flex flex-col gap-1 p-3 text-left ${
         active ? "border-accent/50 bg-accent/10" : ""
       }`}
@@ -216,18 +223,10 @@ export default function NotesPage() {
           active={view.kind === "all" && !searching}
           onClick={() => selectView({ kind: "all" })}
         />
-        {folders.map((folder) => (
-          <SidebarButton
-            key={folder.id}
-            icon={<FolderIcon width={16} height={16} />}
-            label={folder.name}
-            count={folder.noteCount}
-            active={
-              view.kind === "folder" && view.folderId === folder.id && !searching
-            }
-            onClick={() => selectView({ kind: "folder", folderId: folder.id })}
-          />
-        ))}
+        <FolderTree
+          activeFolderId={view.kind === "folder" && !searching ? view.folderId : null}
+          onSelect={(folderId) => selectView({ kind: "folder", folderId })}
+        />
 
         <SidebarHeading>Collections</SidebarHeading>
         <SidebarButton
@@ -339,6 +338,8 @@ export default function NotesPage() {
           </div>
         )}
       </section>
+      <FolderDialog />
+      <DeleteFolderDialog />
     </div>
   );
 }

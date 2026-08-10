@@ -5,7 +5,8 @@
 @layer base {
   :root {
     color-scheme: dark;
-    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    --font-app: "Inter Variable", system-ui, sans-serif;
+    --font-editor: var(--font-app);
   }
 
   :root[data-theme="light"] {

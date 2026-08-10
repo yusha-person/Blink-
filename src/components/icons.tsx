@@ -36,6 +36,19 @@ export function HabitsIcon(props: IconProps) {
   );
 }
 
+export function TasksIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3 6l1.5 1.5L7 5" />
+      <path d="M11 6h10" />
+      <path d="M3 12l1.5 1.5L7 11" />
+      <path d="M11 12h10" />
+      <path d="M3 18l1.5 1.5L7 17" />
+      <path d="M11 18h10" />
+    </svg>
+  );
+}
+
 export function NotesIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

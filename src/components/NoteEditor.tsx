@@ -382,7 +382,7 @@ export default function NoteEditor({
           placeholder="Write in Markdown… (# headings, **bold**, - lists, - [ ] checklists, ``` code blocks)"
           spellCheck
           readOnly={trashed}
-          className="flex-1 resize-none select-text bg-transparent p-4 font-mono text-sm leading-relaxed text-slate-800 outline-none placeholder:text-slate-400 read-only:text-slate-500 dark:text-slate-100 dark:read-only:text-slate-400"
+          className="flex-1 resize-none select-text bg-transparent p-4 font-editor text-sm leading-relaxed text-slate-800 outline-none placeholder:text-slate-400 read-only:text-slate-500 dark:text-slate-100 dark:read-only:text-slate-400"
         />
       ) : (
         <div className="flex-1 overflow-y-auto p-4">

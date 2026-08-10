@@ -153,6 +153,60 @@ pub const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_notes_created_day ON notes(substr(created_at, 1, 10));
     "#,
     },
+    Migration {
+        version: 7,
+        name: "tasks, nested folders, custom achievements",
+        sql: r#"
+        CREATE TABLE folders_new (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL,
+            parent_id  INTEGER NOT NULL DEFAULT 0,
+            sort_order INTEGER NOT NULL,
+            is_system  INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (parent_id, name)
+        );
+
+        INSERT INTO folders_new (id, name, parent_id, sort_order, is_system, created_at)
+            SELECT id, name, 0, sort_order, is_system, created_at FROM folders;
+
+        DROP TABLE folders;
+        ALTER TABLE folders_new RENAME TO folders;
+
+        CREATE TABLE IF NOT EXISTS tasks (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            title        TEXT NOT NULL,
+            description  TEXT NOT NULL DEFAULT '',
+            due_date     TEXT,
+            priority     TEXT CHECK (priority IN ('low', 'medium', 'high')),
+            completed_at TEXT,
+            created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date);
+
+        CREATE TABLE IF NOT EXISTS custom_achievements (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            name           TEXT NOT NULL,
+            description    TEXT NOT NULL DEFAULT '',
+            icon           TEXT NOT NULL DEFAULT '🏆',
+            condition_type TEXT NOT NULL CHECK (condition_type IN (
+                'total_xp', 'total_points', 'habits_completed', 'habit_count',
+                'current_streak', 'longest_streak', 'pages_read',
+                'meditation_sessions', 'chess_sessions', 'practice_pad_sessions',
+                'notes_created', 'tasks_completed'
+            )),
+            target         INTEGER NOT NULL CHECK (target > 0),
+            habit_id       INTEGER REFERENCES habits(id),
+            xp_reward      INTEGER NOT NULL DEFAULT 0 CHECK (xp_reward >= 0),
+            point_reward   INTEGER NOT NULL DEFAULT 0 CHECK (point_reward >= 0),
+            unlocked_at    TEXT,
+            created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+    "#,
+    },
 ];
 
 pub fn current_version(conn: &Connection) -> Result<u32, String> {
@@ -162,6 +216,9 @@ pub fn current_version(conn: &Connection) -> Result<u32, String> {
 
 pub fn run_migrations(conn: &mut Connection) -> Result<(), String> {
     let mut version = current_version(conn)?;
+
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .map_err(|e| format!("failed to disable foreign keys for migrations: {e}"))?;
 
     for migration in MIGRATIONS {
         if migration.version <= version {
@@ -178,6 +235,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<(), String> {
             .map_err(|e| format!("failed to commit migration {}: {e}", migration.name))?;
         version = migration.version;
     }
+
+    conn.execute_batch("PRAGMA foreign_keys = ON")
+        .map_err(|e| format!("failed to re-enable foreign keys after migrations: {e}"))?;
 
     Ok(())
 }

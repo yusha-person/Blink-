@@ -1,12 +1,14 @@
 pub mod achievements;
 pub mod calendar;
 pub mod crypto;
+pub mod custom_achievements;
 pub mod data;
 pub mod habits;
 pub mod journal;
 pub mod notes;
 pub mod statistics;
 pub mod streaks;
+pub mod tasks;
 pub mod xp;
 
 use rusqlite::Connection;

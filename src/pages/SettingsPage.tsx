@@ -1,4 +1,5 @@
 import DataSettings from "../components/DataSettings";
+import FontPicker from "../components/FontPicker";
 import GoalSettings from "../components/GoalSettings";
 import PrivacySettings from "../components/PrivacySettings";
 import { SettingsRow, SettingsSection } from "../components/SettingsSection";
@@ -13,8 +14,11 @@ export default function SettingsPage() {
       </header>
 
       <SettingsSection title="Appearance" description="Theme and visual preferences.">
-        <div className="p-4">
+        <div className="flex flex-col gap-6 p-4">
           <ThemePicker />
+          <div className="border-t border-border pt-5">
+            <FontPicker />
+          </div>
         </div>
       </SettingsSection>
 

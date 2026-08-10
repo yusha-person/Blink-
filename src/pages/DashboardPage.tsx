@@ -1,6 +1,12 @@
+import { useEffect, useMemo } from "react";
+import { Link } from "react-router-dom";
 import { ProgressBar, StatCard } from "../components/StatCard";
+import { TaskRow } from "../components/TaskRow";
 import { useGoalStore } from "../stores/goalStore";
 import { useHabitStore } from "../stores/habitStore";
+import { useTaskStore } from "../stores/taskStore";
+import { groupTasks, sortTasks } from "../utils/tasks";
+import { localDateString } from "../utils/timestamps";
 
 function dayLabel(date: string): string {
   const dayMs = Date.parse(`${date}T00:00:00Z`);
@@ -27,6 +33,29 @@ export default function DashboardPage() {
   const error = useHabitStore((s) => s.error);
   const minGoal = useGoalStore((s) => s.minGoal);
   const stretchGoal = useGoalStore((s) => s.stretchGoal);
+  const tasks = useTaskStore((s) => s.tasks);
+  const tasksHydrated = useTaskStore((s) => s.hydrated);
+  const hydrateTasks = useTaskStore((s) => s.hydrate);
+  const toggleTask = useTaskStore((s) => s.toggleTask);
+
+  useEffect(() => {
+    void hydrateTasks();
+  }, [hydrateTasks]);
+
+  const todayString = localDateString();
+  const taskGroups = useMemo(() => {
+    const open = sortTasks(
+      tasks.filter((t) => !t.completedAt),
+      "due",
+    );
+    return groupTasks(open, todayString);
+  }, [tasks, todayString]);
+  const openTaskCount = tasks.filter((t) => !t.completedAt).length;
+  const completedTaskCount = tasks.length - openTaskCount;
+
+  const handleTaskToggle = (id: number, completed: boolean) => {
+    void toggleTask(id, completed);
+  };
 
   const today = new Date().toLocaleDateString(undefined, {
     weekday: "long",
@@ -111,6 +140,49 @@ export default function DashboardPage() {
         <p className="text-xs text-slate-500">
           {xpIntoLevel.toLocaleString()} / {levelSpan.toLocaleString()} XP this level
         </p>
+      </section>
+
+      <section className="glass flex flex-col gap-3 p-5">
+        <div className="flex items-baseline justify-between">
+          <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200">Tasks</h3>
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            {openTaskCount} open · {completedTaskCount} completed
+          </span>
+        </div>
+        {!tasksHydrated ? (
+          <p className="text-sm text-slate-500">Loading…</p>
+        ) : taskGroups.overdue.length + taskGroups.today.length + taskGroups.upcoming.length === 0 ? (
+          <p className="text-sm text-slate-500">
+            Nothing due soon. <Link to="/tasks" className="text-accent">Open Tasks</Link> to plan ahead.
+          </p>
+        ) : (
+          <>
+            {([
+              ["Overdue", taskGroups.overdue],
+              ["Today", taskGroups.today],
+              ["Upcoming (7 days)", taskGroups.upcoming],
+            ] as const).map(([label, list]) =>
+              list.length === 0 ? null : (
+                <div key={label} className="flex flex-col gap-1.5">
+                  <span className={`text-[10px] font-semibold uppercase tracking-wide ${label === "Overdue" ? "text-danger" : "text-slate-500 dark:text-slate-400"}`}>
+                    {label}
+                  </span>
+                  {list.slice(0, 5).map((task) => (
+                    <TaskRow key={task.id} task={task} today={todayString} onToggle={handleTaskToggle} />
+                  ))}
+                  {list.length > 5 && (
+                    <Link to="/tasks" className="text-xs text-accent">
+                      +{list.length - 5} more
+                    </Link>
+                  )}
+                </div>
+              ),
+            )}
+            <Link to="/tasks" className="mt-1 self-end text-xs text-accent">
+              View all tasks
+            </Link>
+          </>
+        )}
       </section>
 
       <section className="glass flex flex-col gap-2 p-5">

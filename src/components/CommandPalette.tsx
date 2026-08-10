@@ -10,13 +10,16 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useNoteStore } from "../stores/noteStore";
 import { usePrivacyStore } from "../stores/privacyStore";
+import { useTaskStore } from "../stores/taskStore";
 import { useThemeStore } from "../stores/themeStore";
+import { useAchievementStore } from "../stores/achievementStore";
 import { useUiStore } from "../stores/uiStore";
 import OverlayDialog from "./OverlayDialog";
 import {
   AchievementsIcon,
   CalendarIcon,
   DashboardIcon,
+  FolderIcon,
   HabitsIcon,
   JournalIcon,
   LockIcon,
@@ -27,6 +30,7 @@ import {
   SettingsIcon,
   StatisticsIcon,
   SunIcon,
+  TasksIcon,
 } from "./icons";
 
 type Command = {
@@ -65,6 +69,7 @@ export default function CommandPalette() {
     const list: Command[] = [
       { id: "nav-dashboard", title: "Go to Dashboard", section: "Navigate", keywords: "home overview", icon: DashboardIcon, run: goTo("/") },
       { id: "nav-habits", title: "Go to Habits", section: "Navigate", keywords: "habit tracker daily", icon: HabitsIcon, run: goTo("/habits") },
+      { id: "nav-tasks", title: "Go to Tasks", section: "Navigate", keywords: "todo task due", icon: TasksIcon, run: goTo("/tasks") },
       { id: "nav-notes", title: "Go to Notes", section: "Navigate", keywords: "note folder", icon: NotesIcon, run: goTo("/notes") },
       { id: "nav-calendar", title: "Go to Calendar", section: "Navigate", keywords: "history days", icon: CalendarIcon, run: goTo("/calendar") },
       { id: "nav-statistics", title: "Go to Statistics", section: "Navigate", keywords: "stats charts xp heatmap", icon: StatisticsIcon, run: goTo("/statistics") },
@@ -103,6 +108,42 @@ export default function CommandPalette() {
         hint: "Ctrl+F",
         icon: SearchIcon,
         run: () => useUiStore.getState().openGlobalSearch(),
+      },
+      {
+        id: "new-task",
+        title: "New Task",
+        section: "Actions",
+        keywords: "create task todo",
+        hint: "Ctrl+T",
+        icon: TasksIcon,
+        run: () => {
+          navigate("/tasks");
+          useTaskStore.getState().openCreateDialog();
+        },
+      },
+      {
+        id: "new-folder",
+        title: "New Folder",
+        section: "Actions",
+        keywords: "create folder notes organize",
+        icon: FolderIcon,
+        run: async () => {
+          navigate("/notes");
+          const store = useNoteStore.getState();
+          if (!store.hydrated) await store.hydrate();
+          useNoteStore.getState().openFolderDialog(null);
+        },
+      },
+      {
+        id: "new-custom-achievement",
+        title: "New Custom Achievement",
+        section: "Actions",
+        keywords: "create achievement badge reward",
+        icon: AchievementsIcon,
+        run: () => {
+          navigate("/achievements");
+          useAchievementStore.getState().openCustomDialog();
+        },
       },
       {
         id: "toggle-theme",

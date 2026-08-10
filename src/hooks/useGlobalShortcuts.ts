@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useNoteStore } from "../stores/noteStore";
+import { useTaskStore } from "../stores/taskStore";
 import { useUiStore } from "../stores/uiStore";
 
 export function useGlobalShortcuts() {
@@ -18,6 +19,13 @@ export function useGlobalShortcuts() {
             void useNoteStore.getState().createQuickNote();
           } else {
             void useNoteStore.getState().createNoteGlobal();
+          }
+          break;
+        case "KeyT":
+          if (!e.shiftKey) {
+            e.preventDefault();
+            navigate("/tasks");
+            useTaskStore.getState().openCreateDialog();
           }
           break;
         case "KeyF":

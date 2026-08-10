@@ -7,19 +7,21 @@ use crate::db::Database;
 
 pub const QUICK_NOTES_FOLDER: &str = "Quick Notes";
 pub const LOCKED_NOTE_TITLE: &str = "Private note";
-
-fn session_key(crypto: &tauri::State<'_, CryptoState>) -> Option<[u8; crypto::KEY_LEN]> {
-    crypto.inner().key()
-}
+pub const MAX_FOLDER_DEPTH: i64 = 5;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderEntry {
     pub id: i64,
     pub name: String,
+    pub parent_id: i64,
     pub sort_order: i64,
     pub is_system: bool,
     pub note_count: i64,
+}
+
+fn session_key(crypto: &tauri::State<'_, CryptoState>) -> Option<[u8; crypto::KEY_LEN]> {
+    crypto.inner().key()
 }
 
 #[derive(Serialize)]
@@ -274,65 +276,140 @@ fn normalize_folder_name(name: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
+fn folder_entry(row: &rusqlite::Row) -> rusqlite::Result<FolderEntry> {
+    Ok(FolderEntry {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        parent_id: row.get(2)?,
+        sort_order: row.get(3)?,
+        is_system: row.get::<_, i64>(4)? != 0,
+        note_count: row.get(5)?,
+    })
+}
+
+const FOLDER_COLUMNS: &str =
+    "f.id, f.name, f.parent_id, f.sort_order, f.is_system, (SELECT COUNT(*) FROM notes n WHERE n.folder_id = f.id AND n.trashed_at IS NULL)";
+
+fn get_folder_entry(conn: &Connection, id: i64) -> Result<FolderEntry, String> {
+    conn.query_row(
+        &format!("SELECT {FOLDER_COLUMNS} FROM folders f WHERE f.id = ?1"),
+        [id],
+        folder_entry,
+    )
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => format!("folder {id} not found"),
+        other => format!("failed to load folder {id}: {other}"),
+    })
+}
+
+fn folder_depth(conn: &Connection, id: i64) -> Result<i64, String> {
+    let mut depth = 0;
+    let mut current = id;
+    loop {
+        let parent: i64 = conn
+            .query_row(
+                "SELECT parent_id FROM folders WHERE id = ?1",
+                [current],
+                |row| row.get(0),
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => format!("folder {current} not found"),
+                other => format!("failed to read folder {current}: {other}"),
+            })?;
+        depth += 1;
+        if parent == 0 {
+            return Ok(depth);
+        }
+        if depth > MAX_FOLDER_DEPTH + 1 {
+            return Err("folder tree is deeper than the supported maximum".to_string());
+        }
+        current = parent;
+    }
+}
+
+/// Height of the subtree rooted at `id` (1 = just the folder itself).
+fn subtree_height(conn: &Connection, id: i64) -> Result<i64, String> {
+    conn.query_row(
+        "WITH RECURSIVE subtree(id, depth) AS (
+             SELECT id, 1 FROM folders WHERE id = ?1
+             UNION ALL
+             SELECT f.id, s.depth + 1 FROM folders f JOIN subtree s ON f.parent_id = s.id
+         )
+         SELECT COALESCE(MAX(depth), 0) FROM subtree",
+        [id],
+        |row| row.get(0),
+    )
+    .map_err(|e| format!("failed to measure folder subtree {id}: {e}"))
+}
+
+/// All folder ids in the subtree rooted at `id`, including `id` itself.
+fn subtree_ids(conn: &Connection, id: i64) -> Result<Vec<i64>, String> {
+    let mut stmt = conn
+        .prepare(
+            "WITH RECURSIVE subtree(id) AS (
+                 SELECT id FROM folders WHERE id = ?1
+                 UNION ALL
+                 SELECT f.id FROM folders f JOIN subtree s ON f.parent_id = s.id
+             )
+             SELECT id FROM subtree",
+        )
+        .map_err(|e| format!("failed to prepare subtree query: {e}"))?;
+    let rows = stmt
+        .query_map([id], |row| row.get::<_, i64>(0))
+        .map_err(|e| format!("failed to read subtree of folder {id}: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("failed to collect subtree of folder {id}: {e}"))
+}
+
+fn is_duplicate_folder_error(e: &rusqlite::Error, name: &str) -> String {
+    match e {
+        rusqlite::Error::SqliteFailure(err, _)
+            if err.code == rusqlite::ErrorCode::ConstraintViolation =>
+        {
+            format!("a folder named '{name}' already exists at that level")
+        }
+        other => format!("failed to save folder '{name}': {other}"),
+    }
+}
+
 #[tauri::command]
 pub fn list_folders(db: tauri::State<'_, Database>) -> Result<Vec<FolderEntry>, String> {
     let conn = db.conn()?;
     let mut stmt = conn
-        .prepare(
-            "SELECT f.id, f.name, f.sort_order, f.is_system,
-                    (SELECT COUNT(*) FROM notes n
-                     WHERE n.folder_id = f.id AND n.trashed_at IS NULL) AS note_count
-             FROM folders f
-             ORDER BY f.sort_order ASC, f.id ASC",
-        )
+        .prepare(&format!(
+            "SELECT {FOLDER_COLUMNS} FROM folders f ORDER BY f.sort_order ASC, f.id ASC"
+        ))
         .map_err(|e| format!("failed to prepare folder query: {e}"))?;
     let rows = stmt
-        .query_map([], |row| {
-            Ok(FolderEntry {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                sort_order: row.get(2)?,
-                is_system: row.get::<_, i64>(3)? != 0,
-                note_count: row.get(4)?,
-            })
-        })
+        .query_map([], folder_entry)
         .map_err(|e| format!("failed to list folders: {e}"))?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("failed to list folders: {e}"))
 }
 
 #[tauri::command]
-pub fn create_folder(db: tauri::State<'_, Database>, name: String) -> Result<FolderEntry, String> {
+pub fn create_folder(
+    db: tauri::State<'_, Database>,
+    name: String,
+    parent_id: Option<i64>,
+) -> Result<FolderEntry, String> {
     let name = normalize_folder_name(&name)?;
+    let parent_id = parent_id.unwrap_or(0);
     let conn = db.conn()?;
-    conn.execute(
-        "INSERT INTO folders (name, sort_order, is_system)
-         VALUES (?1, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM folders), 0)",
-        [&name],
-    )
-    .map_err(|e| match e {
-        rusqlite::Error::SqliteFailure(err, _)
-            if err.code == rusqlite::ErrorCode::ConstraintViolation =>
-        {
-            format!("folder '{name}' already exists")
+    if parent_id != 0 {
+        if folder_depth(&conn, parent_id)? >= MAX_FOLDER_DEPTH {
+            return Err(format!(
+                "folders can be nested at most {MAX_FOLDER_DEPTH} levels deep"
+            ));
         }
-        other => format!("failed to create folder '{name}': {other}"),
-    })?;
-    let id = conn.last_insert_rowid();
-    conn.query_row(
-        "SELECT id, name, sort_order, is_system, 0 FROM folders WHERE id = ?1",
-        [id],
-        |row| {
-            Ok(FolderEntry {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                sort_order: row.get(2)?,
-                is_system: row.get::<_, i64>(3)? != 0,
-                note_count: row.get(4)?,
-            })
-        },
+    }
+    conn.execute(
+        "INSERT INTO folders (name, parent_id, sort_order, is_system)
+         VALUES (?1, ?2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM folders WHERE parent_id = ?2), 0)",
+        rusqlite::params![name, parent_id],
     )
-    .map_err(|e| format!("failed to load created folder: {e}"))
+    .map_err(|e| is_duplicate_folder_error(&e, &name))?;
+    get_folder_entry(&conn, conn.last_insert_rowid())
 }
 
 #[tauri::command]
@@ -360,29 +437,124 @@ pub fn rename_folder(
         "UPDATE folders SET name = ?1 WHERE id = ?2",
         rusqlite::params![name, folder_id],
     )
-    .map_err(|e| match e {
-        rusqlite::Error::SqliteFailure(err, _)
-            if err.code == rusqlite::ErrorCode::ConstraintViolation =>
-        {
-            format!("folder '{name}' already exists")
-        }
-        other => format!("failed to rename folder {folder_id}: {other}"),
-    })?;
+    .map_err(|e| is_duplicate_folder_error(&e, &name))?;
     Ok(())
 }
 
+/// Moves a folder to a new parent (0 = root) at the given sibling index,
+/// then normalizes the sort_order of the new parent's children to 1..n.
 #[tauri::command]
-pub fn delete_folder(db: tauri::State<'_, Database>, folder_id: i64) -> Result<(), String> {
+pub fn move_folder(
+    db: tauri::State<'_, Database>,
+    folder_id: i64,
+    new_parent_id: i64,
+    new_index: Option<i64>,
+) -> Result<(), String> {
     let mut conn = db.conn()?;
     let tx = conn
         .transaction()
         .map_err(|e| format!("failed to begin transaction: {e}"))?;
 
-    let is_system: i64 = tx
+    let (is_system, old_parent): (i64, i64) = tx
         .query_row(
-            "SELECT is_system FROM folders WHERE id = ?1",
+            "SELECT is_system, parent_id FROM folders WHERE id = ?1",
             [folder_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => format!("folder {folder_id} not found"),
+            other => format!("failed to load folder {folder_id}: {other}"),
+        })?;
+    if is_system != 0 && new_parent_id != old_parent {
+        return Err("system folders cannot be moved".to_string());
+    }
+    if new_parent_id == folder_id {
+        return Err("a folder cannot be moved into itself".to_string());
+    }
+    if new_parent_id != 0 {
+        if subtree_ids(&tx, folder_id)?.contains(&new_parent_id) {
+            return Err("a folder cannot be moved into its own subfolder".to_string());
+        }
+        let parent_depth = folder_depth(&tx, new_parent_id)?;
+        if parent_depth + subtree_height(&tx, folder_id)? > MAX_FOLDER_DEPTH {
+            return Err(format!(
+                "folders can be nested at most {MAX_FOLDER_DEPTH} levels deep"
+            ));
+        }
+    }
+
+    let mut siblings: Vec<i64> = {
+        let mut stmt = tx
+            .prepare(
+                "SELECT id FROM folders WHERE parent_id = ?1 AND id != ?2
+                 ORDER BY sort_order ASC, id ASC",
+            )
+            .map_err(|e| format!("failed to prepare sibling query: {e}"))?;
+        let rows = stmt
+            .query_map(rusqlite::params![new_parent_id, folder_id], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map_err(|e| format!("failed to list siblings: {e}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("failed to collect siblings: {e}"))?
+    };
+    let index = new_index
+        .unwrap_or(i64::MAX)
+        .clamp(0, siblings.len() as i64) as usize;
+    siblings.insert(index, folder_id);
+
+    tx.execute(
+        "UPDATE folders SET parent_id = ?1 WHERE id = ?2",
+        rusqlite::params![new_parent_id, folder_id],
+    )
+    .map_err(|e| {
+        if let rusqlite::Error::SqliteFailure(err, _) = &e {
+            if err.code == rusqlite::ErrorCode::ConstraintViolation {
+                return "a folder with that name already exists at the destination".to_string();
+            }
+        }
+        format!("failed to move folder {folder_id}: {e}")
+    })?;
+    for (position, id) in siblings.iter().enumerate() {
+        tx.execute(
+            "UPDATE folders SET sort_order = ?1 WHERE id = ?2",
+            rusqlite::params![position as i64 + 1, id],
+        )
+        .map_err(|e| format!("failed to reorder folder {id}: {e}"))?;
+    }
+
+    tx.commit()
+        .map_err(|e| format!("failed to commit folder move: {e}"))?;
+    Ok(())
+}
+
+/// Deletes a folder without ever deleting notes.
+/// - `notes_destination_id`: where direct (promote) or subtree-wide (delete_subfolders)
+///   notes are moved. Required whenever the affected folders contain any notes.
+/// - `subfolder_action`: "promote" (children move up to the deleted folder's parent)
+///   or "delete_subfolders" (recursively delete children; all subtree notes relocate).
+#[tauri::command]
+pub fn delete_folder(
+    db: tauri::State<'_, Database>,
+    folder_id: i64,
+    notes_destination_id: Option<i64>,
+    subfolder_action: Option<String>,
+) -> Result<(), String> {
+    let action = subfolder_action.as_deref().unwrap_or("promote");
+    if action != "promote" && action != "delete_subfolders" {
+        return Err(format!("invalid subfolder action '{action}'"));
+    }
+
+    let mut conn = db.conn()?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("failed to begin transaction: {e}"))?;
+
+    let (is_system, parent_id): (i64, i64) = tx
+        .query_row(
+            "SELECT is_system, parent_id FROM folders WHERE id = ?1",
+            [folder_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => format!("folder {folder_id} not found"),
@@ -392,24 +564,65 @@ pub fn delete_folder(db: tauri::State<'_, Database>, folder_id: i64) -> Result<(
         return Err("system folders cannot be deleted".to_string());
     }
 
-    let fallback_id: i64 = tx
+    let subtree = subtree_ids(&tx, folder_id)?;
+    let affected: &[i64] = if action == "delete_subfolders" {
+        &subtree
+    } else {
+        &subtree[..1]
+    };
+
+    let placeholders = affected.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let note_count: i64 = tx
         .query_row(
-            "SELECT id FROM folders WHERE name = ?1",
-            [QUICK_NOTES_FOLDER],
+            &format!(
+                "SELECT COUNT(*) FROM notes WHERE folder_id IN ({placeholders})"
+            ),
+            rusqlite::params_from_iter(affected.iter()),
             |row| row.get(0),
         )
-        .map_err(|e| format!("failed to locate '{QUICK_NOTES_FOLDER}' folder: {e}"))?;
-    if fallback_id == folder_id {
-        return Err("cannot delete the fallback folder".to_string());
+        .map_err(|e| format!("failed to count notes in folder {folder_id}: {e}"))?;
+
+    if note_count > 0 {
+        let destination = notes_destination_id
+            .ok_or("choose a destination folder for the notes before deleting")?;
+        if affected.contains(&destination) {
+            return Err("notes cannot be moved into a folder that is being deleted".to_string());
+        }
+        get_folder_entry(&tx, destination)?;
+        let mut move_params: Vec<rusqlite::types::Value> = Vec::new();
+        move_params.push(destination.into());
+        move_params.push(now_local().into());
+        move_params.extend(affected.iter().map(|id| (*id).into()));
+        tx.execute(
+            &format!(
+                "UPDATE notes SET folder_id = ?1, updated_at = ?2 WHERE folder_id IN ({placeholders})"
+            ),
+            rusqlite::params_from_iter(move_params),
+        )
+        .map_err(|e| format!("failed to move notes out of folder {folder_id}: {e}"))?;
+    }
+
+    if action == "promote" {
+        tx.execute(
+            "UPDATE folders SET parent_id = ?1 WHERE parent_id = ?2",
+            rusqlite::params![parent_id, folder_id],
+        )
+        .map_err(|e| {
+            if let rusqlite::Error::SqliteFailure(err, _) = &e {
+                if err.code == rusqlite::ErrorCode::ConstraintViolation {
+                    return "a subfolder name conflicts with a folder at the destination level"
+                        .to_string();
+                }
+            }
+            format!("failed to promote subfolders of {folder_id}: {e}")
+        })?;
     }
 
     tx.execute(
-        "UPDATE notes SET folder_id = ?1, updated_at = ?2 WHERE folder_id = ?3",
-        rusqlite::params![fallback_id, now_local(), folder_id],
+        &format!("DELETE FROM folders WHERE id IN ({placeholders})"),
+        rusqlite::params_from_iter(affected.iter()),
     )
-    .map_err(|e| format!("failed to move notes out of folder {folder_id}: {e}"))?;
-    tx.execute("DELETE FROM folders WHERE id = ?1", [folder_id])
-        .map_err(|e| format!("failed to delete folder {folder_id}: {e}"))?;
+    .map_err(|e| format!("failed to delete folder {folder_id}: {e}"))?;
 
     tx.commit()
         .map_err(|e| format!("failed to commit folder deletion: {e}"))?;

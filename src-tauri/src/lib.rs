@@ -55,6 +55,7 @@ pub fn run() {
             commands::notes::list_folders,
             commands::notes::create_folder,
             commands::notes::rename_folder,
+            commands::notes::move_folder,
             commands::notes::delete_folder,
             commands::notes::list_notes,
             commands::notes::search_notes,
@@ -70,7 +71,16 @@ pub fn run() {
             commands::notes::restore_note,
             commands::notes::delete_note_permanently,
             commands::notes::list_tags,
-            commands::notes::set_note_tags
+            commands::notes::set_note_tags,
+            commands::tasks::list_tasks,
+            commands::tasks::create_task,
+            commands::tasks::update_task,
+            commands::tasks::set_task_completed,
+            commands::tasks::delete_task,
+            commands::custom_achievements::list_custom_achievements,
+            commands::custom_achievements::create_custom_achievement,
+            commands::custom_achievements::update_custom_achievement,
+            commands::custom_achievements::delete_custom_achievement
         ])
         .run(tauri::generate_context!())
         .expect("error while running LifeXP");

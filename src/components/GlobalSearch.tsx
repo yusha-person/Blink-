@@ -11,6 +11,7 @@ import { useNavigate } from "react-router-dom";
 import { useHabitStore } from "../stores/habitStore";
 import { todayLocalString, useCalendarStore } from "../stores/calendarStore";
 import { useNoteStore } from "../stores/noteStore";
+import { useTaskStore } from "../stores/taskStore";
 import { useUiStore } from "../stores/uiStore";
 import type { JournalEntry } from "../types/journal";
 import type { NoteSummary } from "../types/notes";
@@ -22,12 +23,13 @@ import {
   JournalIcon,
   NotesIcon,
   TagIcon,
+  TasksIcon,
 } from "./icons";
 
 const SEARCH_DEBOUNCE_MS = 150;
 const SECTION_LIMIT = 8;
 
-type ResultSection = "Notes" | "Journal" | "Tags" | "Folders" | "Habits";
+type ResultSection = "Notes" | "Journal" | "Tags" | "Folders" | "Habits" | "Tasks";
 
 type SearchResult = {
   id: string;
@@ -188,6 +190,28 @@ export default function GlobalSearch() {
               subtitle: `+${habit.points} pts`,
               icon: HabitsIcon,
               run: () => navigate("/habits"),
+            });
+          }
+          const taskStore = useTaskStore.getState();
+          if (!taskStore.hydrated) await taskStore.hydrate();
+          if (request !== requestRef.current) return;
+          for (const task of useTaskStore
+            .getState()
+            .tasks.filter((t) => t.title.toLowerCase().includes(needle))
+            .slice(0, SECTION_LIMIT)) {
+            next.push({
+              id: `task-${task.id}`,
+              section: "Tasks",
+              title: task.title,
+              subtitle: [
+                task.completedAt ? "Completed" : "Open",
+                task.dueDate ? `due ${task.dueDate}` : "",
+                task.priority ?? "",
+              ]
+                .filter(Boolean)
+                .join(" · "),
+              icon: TasksIcon,
+              run: () => navigate("/tasks"),
             });
           }
           setResults(next);

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
+import { useAchievementStore } from "./achievementStore";
 import type {
   FolderEntry,
   NoteDetail,
@@ -19,6 +20,18 @@ export type NotesView =
   | { kind: "trash" }
   | { kind: "folder"; folderId: number }
   | { kind: "tag"; tag: string };
+
+export type FolderDialogState =
+  | { mode: "create"; parentId: number | null }
+  | { mode: "rename"; folder: FolderEntry }
+  | null;
+
+export type DeleteFolderRequest = {
+  folder: FolderEntry;
+  directNoteCount: number;
+  subfolderCount: number;
+  subtreeNoteCount: number;
+};
 
 type NoteState = {
   folders: FolderEntry[];
@@ -52,6 +65,21 @@ type NoteState = {
   trashNote: (noteId: number) => Promise<void>;
   restoreNote: (noteId: number) => Promise<void>;
   deleteNotePermanently: (noteId: number) => Promise<void>;
+  folderDialog: FolderDialogState;
+  openFolderDialog: (parentId: number | null, folder?: FolderEntry) => void;
+  closeFolderDialog: () => void;
+  deleteFolderRequest: DeleteFolderRequest | null;
+  requestDeleteFolder: (request: DeleteFolderRequest) => void;
+  cancelDeleteFolder: () => void;
+  createFolder: (name: string, parentId: number | null) => Promise<boolean>;
+  renameFolder: (folderId: number, name: string) => Promise<boolean>;
+  moveFolder: (folderId: number, newParentId: number, newIndex?: number) => Promise<void>;
+  deleteFolder: (
+    folderId: number,
+    notesDestinationId: number | null,
+    subfolderAction: "promote" | "delete_subfolders",
+  ) => Promise<boolean>;
+  moveNote: (noteId: number, folderId: number) => Promise<void>;
 };
 
 export const useNoteStore = create<NoteState>((set, get) => ({
@@ -209,6 +237,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       const note = await invoke<NoteDetail>("create_note", { folderId });
       set({ selectedNote: note, backlinks: [], searchQuery: "", error: null });
       await Promise.all([get().refreshMeta(), get().refreshNotes()]);
+      void useAchievementStore.getState().refresh();
     } catch (e) {
       set({ error: String(e) });
     }
@@ -347,6 +376,87 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     } catch (e) {
       set({ error: String(e) });
       throw e;
+    }
+  },
+
+  folderDialog: null,
+  openFolderDialog: (parentId, folder) =>
+    set({ folderDialog: folder ? { mode: "rename", folder } : { mode: "create", parentId } }),
+  closeFolderDialog: () => set({ folderDialog: null }),
+
+  deleteFolderRequest: null,
+  requestDeleteFolder: (request) => set({ deleteFolderRequest: request }),
+  cancelDeleteFolder: () => set({ deleteFolderRequest: null }),
+
+  createFolder: async (name, parentId) => {
+    try {
+      await invoke("create_folder", { name, parentId });
+      set({ error: null, folderDialog: null });
+      await get().refreshMeta();
+      return true;
+    } catch (e) {
+      set({ error: String(e) });
+      return false;
+    }
+  },
+
+  renameFolder: async (folderId, name) => {
+    try {
+      await invoke("rename_folder", { folderId, name });
+      set({ error: null, folderDialog: null });
+      await get().refreshMeta();
+      return true;
+    } catch (e) {
+      set({ error: String(e) });
+      return false;
+    }
+  },
+
+  moveFolder: async (folderId, newParentId, newIndex) => {
+    try {
+      await invoke("move_folder", {
+        folderId,
+        newParentId,
+        newIndex: newIndex ?? null,
+      });
+      set({ error: null });
+      await get().refreshMeta();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  deleteFolder: async (folderId, notesDestinationId, subfolderAction) => {
+    try {
+      await invoke("delete_folder", {
+        folderId,
+        notesDestinationId,
+        subfolderAction,
+      });
+      const { view } = get();
+      if (view.kind === "folder" && view.folderId === folderId) {
+        set({ view: { kind: "all" } });
+      }
+      set({ error: null, deleteFolderRequest: null });
+      await Promise.all([get().refreshMeta(), get().refreshNotes()]);
+      return true;
+    } catch (e) {
+      set({ error: String(e) });
+      return false;
+    }
+  },
+
+  moveNote: async (noteId, folderId) => {
+    try {
+      await invoke("move_note", { noteId, folderId });
+      set({ error: null });
+      await Promise.all([get().refreshMeta(), get().refreshNotes()]);
+      const selected = get().selectedNote;
+      if (selected?.id === noteId) {
+        await get().selectNote(noteId);
+      }
+    } catch (e) {
+      set({ error: String(e) });
     }
   },
 }));

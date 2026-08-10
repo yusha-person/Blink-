@@ -1,6 +1,7 @@
 export interface FolderEntry {
   id: number;
   name: string;
+  parentId: number;
   sortOrder: number;
   isSystem: boolean;
   noteCount: number;
