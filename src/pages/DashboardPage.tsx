@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { ProgressBar, StatCard } from "../components/StatCard";
+import BusynessChip from "../components/BusynessChip";
 import { TaskRow } from "../components/TaskRow";
 import { useGoalStore } from "../stores/goalStore";
 import { useHabitStore } from "../stores/habitStore";
@@ -88,9 +89,12 @@ export default function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-6 p-8">
-      <header className="flex flex-col gap-1">
-        <h2 className="text-2xl font-semibold text-slate-800 dark:text-slate-100">Dashboard</h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400">{today}</p>
+      <header className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-2xl font-semibold text-slate-800 dark:text-slate-100">Dashboard</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{today}</p>
+        </div>
+        <BusynessChip day={todayString} />
       </header>
 
       {error && (

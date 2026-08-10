@@ -26,6 +26,8 @@ pub struct CalendarHabit {
     pub id: i64,
     pub name: String,
     pub points: i64,
+    pub priority: String,
+    pub icon: String,
 }
 
 #[derive(Serialize)]
@@ -47,6 +49,16 @@ pub struct CalendarNote {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CalendarTask {
+    pub id: i64,
+    pub title: String,
+    pub priority: Option<String>,
+    pub due_time: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CalendarDayDetail {
     pub date: String,
     pub points: i64,
@@ -54,6 +66,7 @@ pub struct CalendarDayDetail {
     pub habits: Vec<CalendarHabit>,
     pub journal: Option<CalendarJournal>,
     pub notes: Vec<CalendarNote>,
+    pub tasks: Vec<CalendarTask>,
 }
 
 fn validate_date(date: &str) -> Result<(), String> {
@@ -227,6 +240,7 @@ pub fn get_calendar_day(
     let habits = read_day_habits(&conn, &date)?;
     let journal = read_day_journal(&conn, &date)?;
     let notes = read_day_notes(&conn, &date, key.as_ref())?;
+    let tasks = read_day_tasks(&conn, &date)?;
 
     Ok(CalendarDayDetail {
         date,
@@ -235,7 +249,32 @@ pub fn get_calendar_day(
         habits,
         journal,
         notes,
+        tasks,
     })
+}
+
+fn read_day_tasks(conn: &Connection, date: &str) -> Result<Vec<CalendarTask>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, title, priority, due_time, completed_at
+             FROM tasks
+             WHERE due_date = ?1
+             ORDER BY due_time IS NULL, due_time ASC, id ASC",
+        )
+        .map_err(|e| format!("failed to prepare calendar tasks query: {e}"))?;
+    let rows = stmt
+        .query_map([date], |row| {
+            Ok(CalendarTask {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                priority: row.get(2)?,
+                due_time: row.get(3)?,
+                completed_at: row.get(4)?,
+            })
+        })
+        .map_err(|e| format!("failed to load calendar tasks: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("failed to load calendar tasks: {e}"))
 }
 
 fn read_day_totals(conn: &Connection, date: &str) -> Result<(i64, i64), String> {
@@ -253,7 +292,7 @@ fn read_day_totals(conn: &Connection, date: &str) -> Result<(i64, i64), String> 
 fn read_day_habits(conn: &Connection, date: &str) -> Result<Vec<CalendarHabit>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT h.id, h.name, h.points
+            "SELECT h.id, h.name, h.points, h.priority, h.icon
              FROM habit_completions c
              JOIN habits h ON h.id = c.habit_id
              WHERE c.date = ?1
@@ -266,6 +305,8 @@ fn read_day_habits(conn: &Connection, date: &str) -> Result<Vec<CalendarHabit>, 
                 id: row.get(0)?,
                 name: row.get(1)?,
                 points: row.get(2)?,
+                priority: row.get(3)?,
+                icon: row.get(4)?,
             })
         })
         .map_err(|e| format!("failed to load calendar habits: {e}"))?;

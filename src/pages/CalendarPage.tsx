@@ -1,19 +1,27 @@
-import { memo, useEffect } from "react";
+import { memo, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import MarkdownPreview from "../components/MarkdownPreview";
+import BusynessChip from "../components/BusynessChip";
+import ConfirmDialog from "../components/ConfirmDialog";
+import TaskDialog from "../components/TaskDialog";
 import { formatJournalDate } from "../components/JournalEditor";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  EditIcon,
   JournalIcon,
   LockIcon,
   NotesIcon,
+  PlusIcon,
+  TrashIcon,
 } from "../components/icons";
 import { todayLocalString, useCalendarStore } from "../stores/calendarStore";
 import { useHabitStore } from "../stores/habitStore";
 import { useJournalStore } from "../stores/journalStore";
 import { useNoteStore } from "../stores/noteStore";
-import type { CalendarDaySummary } from "../types/calendar";
+import { useTaskStore, type TaskInput } from "../stores/taskStore";
+import type { CalendarDaySummary, CalendarTask } from "../types/calendar";
+import { PRIORITY_BADGE_STYLES } from "../utils/priority";
 import { formatFullTimestamp } from "../utils/timestamps";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -113,6 +121,24 @@ export default function CalendarPage() {
   const navigate = useNavigate();
   const todayTotals = useHabitStore((s) => s.todayTotals);
   const journalUpdatedAt = useJournalStore((s) => s.todayEntry?.updatedAt);
+  const tasks = useTaskStore((s) => s.tasks);
+  const tasksHydrated = useTaskStore((s) => s.hydrated);
+  const hydrateTasks = useTaskStore((s) => s.hydrate);
+  const toggleTask = useTaskStore((s) => s.toggleTask);
+  const createTask = useTaskStore((s) => s.createTask);
+  const updateTask = useTaskStore((s) => s.updateTask);
+  const deleteTask = useTaskStore((s) => s.deleteTask);
+
+  const [taskDialog, setTaskDialog] = useState<{ open: boolean; taskId: number | null }>({
+    open: false,
+    taskId: null,
+  });
+  const [deletingTask, setDeletingTask] = useState<CalendarTask | null>(null);
+  const [taskBusy, setTaskBusy] = useState(false);
+
+  useEffect(() => {
+    if (!tasksHydrated) void hydrateTasks();
+  }, [tasksHydrated, hydrateTasks]);
 
   useEffect(() => {
     void hydrate();
@@ -122,7 +148,40 @@ export default function CalendarPage() {
     if (!hydrated) return;
     const timer = setTimeout(() => void refresh(), 150);
     return () => clearTimeout(timer);
-  }, [hydrated, refresh, todayTotals, journalUpdatedAt]);
+  }, [hydrated, refresh, todayTotals, journalUpdatedAt, tasks]);
+
+  const editingTask = taskDialog.taskId != null
+    ? tasks.find((t) => t.id === taskDialog.taskId) ?? null
+    : null;
+
+  const handleTaskSave = async (input: TaskInput) => {
+    setTaskBusy(true);
+    try {
+      if (editingTask) await updateTask(editingTask.id, input);
+      else await createTask(input);
+      setTaskDialog({ open: false, taskId: null });
+      await refresh();
+    } finally {
+      setTaskBusy(false);
+    }
+  };
+
+  const handleTaskDelete = async () => {
+    if (!deletingTask) return;
+    setTaskBusy(true);
+    try {
+      await deleteTask(deletingTask.id);
+      setDeletingTask(null);
+      await refresh();
+    } finally {
+      setTaskBusy(false);
+    }
+  };
+
+  const handleTaskToggle = async (task: CalendarTask) => {
+    await toggleTask(task.id, !task.completedAt);
+    await refresh();
+  };
 
   const openNote = async (noteId: number) => {
     navigate("/notes");
@@ -154,7 +213,8 @@ export default function CalendarPage() {
     (detail.points > 0 ||
       detail.habits.length > 0 ||
       detail.journal !== null ||
-      detail.notes.length > 0);
+      detail.notes.length > 0 ||
+      detail.tasks.length > 0);
 
   return (
     <div className="flex flex-col gap-6 p-8">
@@ -249,15 +309,18 @@ export default function CalendarPage() {
             </p>
           ) : (
             <>
-              <div>
-                <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200">
-                  {formatJournalDate(detail.date)}
-                </h3>
-                {relativeDayLabel(detail.date) && (
-                  <p className="text-xs text-accent">
-                    {relativeDayLabel(detail.date)}
-                  </p>
-                )}
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                    {formatJournalDate(detail.date)}
+                  </h3>
+                  {relativeDayLabel(detail.date) && (
+                    <p className="text-xs text-accent">
+                      {relativeDayLabel(detail.date)}
+                    </p>
+                  )}
+                </div>
+                <BusynessChip day={detail.date} />
               </div>
 
               {!hasDetailData ? (
@@ -294,10 +357,16 @@ export default function CalendarPage() {
                         {detail.habits.map((habit) => (
                           <li
                             key={habit.id}
-                            className="flex items-center justify-between py-1.5"
+                            className="flex items-center gap-2 py-1.5"
                           >
-                            <span className="text-sm text-slate-700 dark:text-slate-300">
+                            {habit.icon && <span className="text-sm">{habit.icon}</span>}
+                            <span className="min-w-0 flex-1 truncate text-sm text-slate-700 dark:text-slate-300">
                               {habit.name}
+                            </span>
+                            <span
+                              className={`rounded-full border px-1.5 py-0.5 text-[9px] font-medium capitalize ${PRIORITY_BADGE_STYLES[habit.priority as "low" | "medium" | "high"] ?? ""}`}
+                            >
+                              {habit.priority}
                             </span>
                             <span className="text-xs font-medium text-accent">
                               +{habit.points} pts
@@ -307,6 +376,76 @@ export default function CalendarPage() {
                       </ul>
                     </div>
                   )}
+
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                        Tasks ({detail.tasks.length})
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => setTaskDialog({ open: true, taskId: null })}
+                        aria-label={`Add task for ${detail.date}`}
+                        className="rounded p-0.5 text-slate-400 hover:text-accent"
+                      >
+                        <PlusIcon width={13} height={13} />
+                      </button>
+                    </div>
+                    {detail.tasks.length > 0 && (
+                      <ul className="flex flex-col divide-y divide-slate-900/5 dark:divide-white/5">
+                        {detail.tasks.map((task) => (
+                          <li key={task.id} className="group flex items-center gap-2 py-1.5">
+                            <input
+                              type="checkbox"
+                              checked={task.completedAt !== null}
+                              onChange={() => void handleTaskToggle(task)}
+                              aria-label={`Mark "${task.title}" ${task.completedAt ? "incomplete" : "complete"}`}
+                              className="h-3.5 w-3.5 shrink-0 accent-accent"
+                            />
+                            <span
+                              className={`min-w-0 flex-1 truncate text-sm ${
+                                task.completedAt
+                                  ? "text-slate-400 line-through dark:text-slate-500"
+                                  : "text-slate-700 dark:text-slate-300"
+                              }`}
+                            >
+                              {task.title}
+                            </span>
+                            {task.dueTime && (
+                              <span className="shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
+                                {task.dueTime}
+                              </span>
+                            )}
+                            {task.priority && (
+                              <span
+                                className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium capitalize ${PRIORITY_BADGE_STYLES[task.priority as "low" | "medium" | "high"]}`}
+                              >
+                                {task.priority}
+                              </span>
+                            )}
+                            <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                              <button
+                                type="button"
+                                onClick={() => setTaskDialog({ open: true, taskId: task.id })}
+                                aria-label={`Edit task "${task.title}"`}
+                                className="rounded p-0.5 text-slate-400 hover:text-accent"
+                              >
+                                <EditIcon width={11} height={11} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeletingTask(task)}
+                                aria-label={`Delete task "${task.title}"`}
+                                className="rounded p-0.5 text-slate-400 hover:text-red-500"
+                              >
+                                <TrashIcon width={11} height={11} />
+                              </button>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
 
                   {detail.journal && (
                     <div className="flex flex-col gap-1">
@@ -375,6 +514,25 @@ export default function CalendarPage() {
           )}
         </section>
       </div>
+
+      {taskDialog.open && (
+        <TaskDialog
+          task={editingTask}
+          defaultDueDate={detail?.date}
+          busy={taskBusy}
+          onSave={(input) => void handleTaskSave(input)}
+          onCancel={() => setTaskDialog({ open: false, taskId: null })}
+        />
+      )}
+      {deletingTask && (
+        <ConfirmDialog
+          title="Delete task"
+          message={`Permanently delete "${deletingTask.title}"? This cannot be undone.`}
+          busy={taskBusy}
+          onConfirm={() => void handleTaskDelete()}
+          onCancel={() => setDeletingTask(null)}
+        />
+      )}
     </div>
   );
 }

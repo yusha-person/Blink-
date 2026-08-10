@@ -133,7 +133,11 @@ fn condition_progress(
             .query_row("SELECT COUNT(*) FROM habit_completions", [], |r| r.get(0))
             .map_err(|e| format!("failed to count completions: {e}")),
         "habit_count" => {
-            let id = habit_id.ok_or("habit_count requires a habit reference")?;
+            // A NULL habit reference (deleted habit) is permanently unevaluatable.
+            let id = match habit_id {
+                Some(id) => id,
+                None => return Ok(0),
+            };
             conn.query_row(
                 "SELECT COUNT(*) FROM habit_completions WHERE habit_id = ?1",
                 [id],

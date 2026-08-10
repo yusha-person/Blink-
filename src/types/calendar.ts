@@ -11,6 +11,8 @@ export interface CalendarHabit {
   id: number;
   name: string;
   points: number;
+  priority: string;
+  icon: string;
 }
 
 export interface CalendarJournal {
@@ -26,6 +28,14 @@ export interface CalendarNote {
   isPrivate: boolean;
 }
 
+export interface CalendarTask {
+  id: number;
+  title: string;
+  priority: string | null;
+  dueTime: string | null;
+  completedAt: string | null;
+}
+
 export interface CalendarDayDetail {
   date: string;
   points: number;
@@ -33,4 +43,5 @@ export interface CalendarDayDetail {
   habits: CalendarHabit[];
   journal: CalendarJournal | null;
   notes: CalendarNote[];
+  tasks: CalendarTask[];
 }

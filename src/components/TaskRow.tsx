@@ -1,13 +1,8 @@
 import { memo } from "react";
 import type { TaskEntry } from "../types/tasks";
+import { PRIORITY_BADGE_STYLES } from "../utils/priority";
 import { formatDueDate, localDateString } from "../utils/timestamps";
 import { CheckIcon, EditIcon, TrashIcon } from "./icons";
-
-export const PRIORITY_STYLES: Record<string, string> = {
-  high: "border-danger/40 bg-danger/10 text-danger",
-  medium: "border-warning/40 bg-warning/10 text-warning",
-  low: "border-accent/40 bg-accent/10 text-accent",
-};
 
 export function taskDueState(task: TaskEntry, today: string): "overdue" | "today" | "future" | null {
   if (!task.dueDate) return null;
@@ -73,9 +68,14 @@ export const TaskRow = memo(function TaskRow({
       <div className="flex shrink-0 items-center gap-1.5">
         {task.priority && (
           <span
-            className={`rounded-full border px-2 py-0.5 text-[10px] font-medium capitalize ${PRIORITY_STYLES[task.priority]}`}
+            className={`rounded-full border px-2 py-0.5 text-[10px] font-medium capitalize ${PRIORITY_BADGE_STYLES[task.priority]}`}
           >
             {task.priority}
+          </span>
+        )}
+        {task.dueTime && (
+          <span className="rounded-full border border-border px-2 py-0.5 text-[10px] text-muted">
+            {task.dueTime}
           </span>
         )}
         {task.dueDate && (

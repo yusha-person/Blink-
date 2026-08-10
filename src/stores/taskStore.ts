@@ -7,6 +7,7 @@ export type TaskInput = {
   title: string;
   description?: string;
   dueDate?: string | null;
+  dueTime?: string | null;
   priority?: TaskPriority | null;
 };
 
@@ -55,6 +56,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       title: input.title,
       description: input.description ?? "",
       dueDate: input.dueDate ?? null,
+      dueTime: input.dueTime ?? null,
       priority: input.priority ?? null,
     });
     await get().hydrate();
@@ -66,6 +68,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       title: input.title,
       description: input.description ?? "",
       dueDate: input.dueDate ?? null,
+      dueTime: input.dueTime ?? null,
       priority: input.priority ?? null,
     });
     await get().hydrate();

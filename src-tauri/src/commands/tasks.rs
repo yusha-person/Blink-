@@ -11,6 +11,7 @@ pub struct TaskEntry {
     pub title: String,
     pub description: String,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub priority: Option<String>,
     pub completed_at: Option<String>,
     pub created_at: String,
@@ -34,6 +35,25 @@ fn validate_date(date: &str) -> Result<(), String> {
     }
 }
 
+fn validate_time(time: &str) -> Result<(), String> {
+    let ok = time.len() == 5
+        && time.chars().enumerate().all(|(i, c)| {
+            if i == 2 {
+                c == ':'
+            } else {
+                c.is_ascii_digit()
+            }
+        });
+    let within_range = ok
+        && time[0..2].parse::<u32>().map_or(false, |h| h < 24)
+        && time[3..5].parse::<u32>().map_or(false, |m| m < 60);
+    if within_range {
+        Ok(())
+    } else {
+        Err(format!("invalid time '{time}', expected HH:MM"))
+    }
+}
+
 fn validate_priority(priority: &Option<String>) -> Result<(), String> {
     match priority.as_deref() {
         None | Some("low") | Some("medium") | Some("high") => Ok(()),
@@ -47,15 +67,16 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<TaskEntry> {
         title: row.get(1)?,
         description: row.get(2)?,
         due_date: row.get(3)?,
-        priority: row.get(4)?,
-        completed_at: row.get(5)?,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+        due_time: row.get(4)?,
+        priority: row.get(5)?,
+        completed_at: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 
 const TASK_COLUMNS: &str =
-    "id, title, description, due_date, priority, completed_at, created_at, updated_at";
+    "id, title, description, due_date, due_time, priority, completed_at, created_at, updated_at";
 
 fn get_task(conn: &Connection, id: i64) -> Result<TaskEntry, String> {
     conn.query_row(
@@ -86,6 +107,7 @@ pub fn create_task(
     title: String,
     description: Option<String>,
     due_date: Option<String>,
+    due_time: Option<String>,
     priority: Option<String>,
 ) -> Result<TaskEntry, String> {
     let title = title.trim().to_string();
@@ -95,16 +117,20 @@ pub fn create_task(
     if let Some(d) = &due_date {
         validate_date(d)?;
     }
+    if let Some(t) = &due_time {
+        validate_time(t)?;
+    }
     validate_priority(&priority)?;
     let conn = db.conn()?;
     let now = now_string();
     conn.execute(
-        "INSERT INTO tasks (title, description, due_date, priority, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+        "INSERT INTO tasks (title, description, due_date, due_time, priority, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
         rusqlite::params![
             title,
             description.unwrap_or_default(),
             due_date,
+            due_time,
             priority,
             now
         ],
@@ -120,6 +146,7 @@ pub fn update_task(
     title: String,
     description: Option<String>,
     due_date: Option<String>,
+    due_time: Option<String>,
     priority: Option<String>,
 ) -> Result<TaskEntry, String> {
     let title = title.trim().to_string();
@@ -129,16 +156,20 @@ pub fn update_task(
     if let Some(d) = &due_date {
         validate_date(d)?;
     }
+    if let Some(t) = &due_time {
+        validate_time(t)?;
+    }
     validate_priority(&priority)?;
     let conn = db.conn()?;
     let changed = conn
         .execute(
-            "UPDATE tasks SET title = ?1, description = ?2, due_date = ?3, priority = ?4, updated_at = ?5
-             WHERE id = ?6",
+            "UPDATE tasks SET title = ?1, description = ?2, due_date = ?3, due_time = ?4, priority = ?5, updated_at = ?6
+             WHERE id = ?7",
             rusqlite::params![
                 title,
                 description.unwrap_or_default(),
                 due_date,
+                due_time,
                 priority,
                 now_string(),
                 id

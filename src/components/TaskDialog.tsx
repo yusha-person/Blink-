@@ -7,18 +7,21 @@ const inputClass =
 
 export default function TaskDialog({
   task,
+  defaultDueDate,
   busy = false,
   onSave,
   onCancel,
 }: {
   task?: TaskEntry | null;
+  defaultDueDate?: string;
   busy?: boolean;
   onSave: (input: TaskInput) => void;
   onCancel: () => void;
 }) {
   const [title, setTitle] = useState(task?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
-  const [dueDate, setDueDate] = useState(task?.dueDate ?? "");
+  const [dueDate, setDueDate] = useState(task?.dueDate ?? defaultDueDate ?? "");
+  const [dueTime, setDueTime] = useState(task?.dueTime ?? "");
   const [priority, setPriority] = useState<TaskPriority | "">(task?.priority ?? "");
 
   useEffect(() => {
@@ -37,6 +40,7 @@ export default function TaskDialog({
       title: title.trim(),
       description: description.trim(),
       dueDate: dueDate || null,
+      dueTime: dueTime || null,
       priority: priority || null,
     });
   };
@@ -84,6 +88,17 @@ export default function TaskDialog({
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
               className={inputClass}
+            />
+          </label>
+          <label className="flex w-28 flex-col gap-1">
+            <span className="text-xs text-muted">Time</span>
+            <input
+              type="time"
+              value={dueTime}
+              onChange={(e) => setDueTime(e.target.value)}
+              disabled={!dueDate}
+              title={dueDate ? "Optional time" : "Set a due date first"}
+              className={`${inputClass} disabled:opacity-50`}
             />
           </label>
           <label className="flex flex-1 flex-col gap-1">

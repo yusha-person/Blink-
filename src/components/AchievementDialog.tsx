@@ -7,7 +7,7 @@ import {
   type CustomConditionType,
 } from "../types/achievements";
 
-const EMOJI_CHOICES = [
+export const EMOJI_CHOICES = [
   "🏆", "🥇", "🎯", "🎖️", "🏅", "⭐", "🔥", "💪",
   "📚", "🏃", "🧘", "♟️", "🥁", "🎵", "🎨", "✍️",
   "📝", "✅", "📅", "⚡", "🌟", "🚀", "💎", "🧠",

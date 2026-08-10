@@ -1,10 +1,13 @@
-export type TaskPriority = "low" | "medium" | "high";
+import type { Priority } from "./habits";
+
+export type TaskPriority = Priority;
 
 export interface TaskEntry {
   id: number;
   title: string;
   description: string;
   dueDate: string | null;
+  dueTime: string | null;
   priority: TaskPriority | null;
   completedAt: string | null;
   createdAt: string;

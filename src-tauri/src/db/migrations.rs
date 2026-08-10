@@ -207,6 +207,21 @@ pub const MIGRATIONS: &[Migration] = &[
         );
     "#,
     },
+    Migration {
+        version: 8,
+        name: "task times, habit priority and metadata",
+        sql: r#"
+        ALTER TABLE tasks ADD COLUMN due_time TEXT;
+
+        ALTER TABLE habits ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'
+            CHECK (priority IN ('low', 'medium', 'high'));
+        ALTER TABLE habits ADD COLUMN description TEXT NOT NULL DEFAULT '';
+        ALTER TABLE habits ADD COLUMN requirement TEXT NOT NULL DEFAULT '';
+        ALTER TABLE habits ADD COLUMN icon TEXT NOT NULL DEFAULT '';
+        ALTER TABLE habits ADD COLUMN is_system INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE habits ADD COLUMN archived_at TEXT;
+    "#,
+    },
 ];
 
 pub fn current_version(conn: &Connection) -> Result<u32, String> {
