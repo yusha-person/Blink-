@@ -408,8 +408,11 @@ pub fn set_habit_archived(
     get_habit_entry(&conn, id)
 }
 
-/// Permanently deletes a custom habit and its entire completion history
-/// (habit_completions cascade). Built-in habits can only be disabled.
+/// Permanently deletes a habit and its entire completion history
+/// (habit_completions cascade). The points/XP that habit contributed are
+/// subtracted from each day's totals — cumulative XP, level, streaks, and
+/// evaluate-on-read achievements all reflect the removal. Already-persisted
+/// unlock timestamps are kept, but any XP they granted via the habit is gone.
 /// Referencing custom achievements keep their row but become unevaluatable
 /// (habit_id set to NULL → progress 0) so their unlock state is preserved.
 #[tauri::command]
@@ -419,16 +422,42 @@ pub fn delete_habit(db: tauri::State<'_, Database>, id: i64) -> Result<(), Strin
         .transaction()
         .map_err(|e| format!("failed to begin transaction: {e}"))?;
 
-    let is_system: i64 = tx
-        .query_row("SELECT is_system FROM habits WHERE id = ?1", [id], |row| {
+    let points: i64 = tx
+        .query_row("SELECT points FROM habits WHERE id = ?1", [id], |row| {
             row.get(0)
         })
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => format!("habit {id} not found"),
             other => format!("failed to load habit {id}: {other}"),
         })?;
-    if is_system != 0 {
-        return Err("built-in habits can only be disabled, not deleted".to_string());
+
+    // Claw back this habit's per-day point/XP contributions before its
+    // completion rows are cascaded away.
+    {
+        let mut stmt = tx
+            .prepare(
+                "SELECT date, COUNT(*) FROM habit_completions WHERE habit_id = ?1 GROUP BY date",
+            )
+            .map_err(|e| format!("failed to prepare clawback query: {e}"))?;
+        let rows = stmt
+            .query_map([id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|e| format!("failed to read habit {id} completions: {e}"))?;
+        let contributions: Vec<(String, i64)> = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("failed to collect habit {id} completions: {e}"))?;
+        for (date, count) in contributions {
+            let points_delta = count * points;
+            tx.execute(
+                "UPDATE daily_totals SET
+                    points = MAX(0, points - ?2),
+                    xp     = MAX(0, xp - ?3)
+                 WHERE date = ?1",
+                rusqlite::params![date, points_delta, points_delta * XP_PER_POINT],
+            )
+            .map_err(|e| format!("failed to claw back totals for {date}: {e}"))?;
+        }
     }
 
     tx.execute(
