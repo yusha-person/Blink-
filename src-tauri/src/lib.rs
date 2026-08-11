@@ -90,7 +90,10 @@ pub fn run() {
             commands::custom_achievements::list_custom_achievements,
             commands::custom_achievements::create_custom_achievement,
             commands::custom_achievements::update_custom_achievement,
-            commands::custom_achievements::delete_custom_achievement
+            commands::custom_achievements::delete_custom_achievement,
+            commands::feedback::list_feedback_reports,
+            commands::feedback::save_feedback_report,
+            commands::feedback::update_feedback_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running Blink");

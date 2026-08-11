@@ -3,6 +3,7 @@ pub mod calendar;
 pub mod crypto;
 pub mod custom_achievements;
 pub mod data;
+pub mod feedback;
 pub mod habits;
 pub mod journal;
 pub mod notes;

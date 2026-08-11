@@ -7,6 +7,7 @@ import {
   AchievementsIcon,
   CalendarIcon,
   DashboardIcon,
+  FeedbackIcon,
   HabitsIcon,
   JournalIcon,
   NotesIcon,
@@ -30,6 +31,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/statistics", label: "Statistics", icon: StatisticsIcon },
   { to: "/journal", label: "Journal", icon: JournalIcon },
   { to: "/achievements", label: "Achievements", icon: AchievementsIcon },
+  { to: "/feedback", label: "Features / Bugs", icon: FeedbackIcon },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 

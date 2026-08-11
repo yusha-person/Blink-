@@ -11,7 +11,7 @@ export default defineConfig({
       ignored: ["**/src-tauri/**"],
     },
   },
-  envPrefix: ["VITE_", "TAURI_"],
+  envPrefix: ["VITE_", "TAURI_", "BLINK_"],
   build: {
     target: "es2022",
     minify: "esbuild",

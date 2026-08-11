@@ -5,6 +5,7 @@ import DashboardPage from "./pages/DashboardPage";
 import HabitsPage from "./pages/HabitsPage";
 import NotesPage from "./pages/NotesPage";
 import TasksPage from "./pages/TasksPage";
+import FeedbackPage from "./pages/FeedbackPage";
 import CalendarPage from "./pages/CalendarPage";
 import JournalPage from "./pages/JournalPage";
 import AchievementsPage from "./pages/AchievementsPage";
@@ -75,6 +76,7 @@ export default function App() {
           />
           <Route path="journal" element={<JournalPage />} />
           <Route path="achievements" element={<AchievementsPage />} />
+          <Route path="feedback" element={<FeedbackPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>

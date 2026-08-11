@@ -276,6 +276,19 @@ pub const MIGRATIONS: &[Migration] = &[
         ALTER TABLE folders ADD COLUMN wrapped_key_folder TEXT;
     "#,
     },
+    Migration {
+        version: 11,
+        name: "feedback report history",
+        sql: r#"
+        CREATE TABLE IF NOT EXISTS feedback_reports (
+            id         TEXT PRIMARY KEY,
+            type       TEXT NOT NULL CHECK (type IN ('feature', 'bug')),
+            title      TEXT NOT NULL,
+            status     TEXT NOT NULL DEFAULT 'Submitted',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+    "#,
+    },
 ];
 
 pub fn current_version(conn: &Connection) -> Result<u32, String> {
