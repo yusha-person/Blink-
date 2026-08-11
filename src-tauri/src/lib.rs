@@ -87,5 +87,5 @@ pub fn run() {
             commands::custom_achievements::delete_custom_achievement
         ])
         .run(tauri::generate_context!())
-        .expect("error while running LifeXP");
+        .expect("error while running Blink");
 }

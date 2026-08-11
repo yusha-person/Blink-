@@ -10,7 +10,7 @@ export default function SettingsPage() {
     <div className="flex flex-col gap-6 p-8">
       <header className="flex flex-col gap-1">
         <h2 className="text-2xl font-semibold text-slate-800 dark:text-slate-100">Settings</h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400">Configure LifeXP to fit your workflow.</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Configure Blink to fit your workflow.</p>
       </header>
 
       <SettingsSection title="Appearance" description="Theme and visual preferences.">
@@ -35,7 +35,7 @@ export default function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection title="About">
-        <SettingsRow label="LifeXP" description="Fully offline habit tracking, notes, and journaling.">
+        <SettingsRow label="Blink" description="Fully offline habit tracking, notes, and journaling.">
           <span className="text-xs text-slate-500">v0.1.0</span>
         </SettingsRow>
       </SettingsSection>

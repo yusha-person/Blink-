@@ -16,7 +16,7 @@ base64 = "0.22"
 [package]
 name = "lifexp"
 version = "0.1.0"
-description = "LifeXP - offline habit tracking, notes and journaling with XP"
+description = "Blink - offline habit tracking, notes and journaling with XP"
 authors = ["yusha"]
 edition = "2021"
 

@@ -42,7 +42,7 @@ export default function AppLayout() {
       <aside className="glass m-3 mr-0 flex w-56 flex-col gap-1 p-3">
         <div className="mb-4 px-2 pt-1">
           <h1 className="text-glow text-xl font-bold tracking-wider text-accent">
-            LifeXP
+            Blink
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">Level up your life</p>
         </div>
