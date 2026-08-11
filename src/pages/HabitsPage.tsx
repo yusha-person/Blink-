@@ -1,5 +1,4 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import ConfirmDialog from "../components/ConfirmDialog";
 import HabitDialog from "../components/HabitDialog";
 import {
@@ -15,7 +14,6 @@ import { useAchievementStore } from "../stores/achievementStore";
 import { useGoalStore } from "../stores/goalStore";
 import { useHabitStore } from "../stores/habitStore";
 import type { HabitEntry, HabitInput } from "../types/habits";
-import type { HabitCompletionStats } from "../types/statistics";
 import { PRIORITY_BADGE_STYLES } from "../utils/priority";
 
 const HabitCard = memo(function HabitCard({
@@ -106,15 +104,17 @@ const HabitCard = memo(function HabitCard({
         >
           <EyeIcon width={13} height={13} />
         </button>
-        <button
-          type="button"
-          onClick={() => onDelete(habit)}
-          aria-label={`Delete ${habit.name}`}
-          title="Delete permanently (removes history and its earned XP)"
-          className="rounded p-1 text-muted hover:text-danger"
-        >
-          <TrashIcon width={13} height={13} />
-        </button>
+        {!habit.isSystem && (
+          <button
+            type="button"
+            onClick={() => onDelete(habit)}
+            aria-label={`Delete ${habit.name}`}
+            title="Delete permanently (removes history)"
+            className="rounded p-1 text-muted hover:text-danger"
+          >
+            <TrashIcon width={13} height={13} />
+          </button>
+        )}
       </span>
     </div>
   );
@@ -143,28 +143,11 @@ export default function HabitsPage() {
     habit: null,
   });
   const [deleting, setDeleting] = useState<HabitEntry | null>(null);
-  const [deleteCompletions, setDeleteCompletions] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!achievementsHydrated) void hydrateAchievements();
   }, [achievementsHydrated, hydrateAchievements]);
-
-  useEffect(() => {
-    if (!deleting) {
-      setDeleteCompletions(null);
-      return;
-    }
-    let cancelled = false;
-    void invoke<HabitCompletionStats[]>("get_habit_completion_stats").then((stats) => {
-      if (cancelled) return;
-      const match = stats.find((s) => s.habitId === deleting.id);
-      setDeleteCompletions(match?.totalCompletions ?? 0);
-    }).catch(() => setDeleteCompletions(null));
-    return () => {
-      cancelled = true;
-    };
-  }, [deleting]);
 
   const activeHabits = useMemo(() => habits.filter((h) => !h.archived), [habits]);
   const disabledHabits = useMemo(() => habits.filter((h) => h.archived), [habits]);
@@ -307,15 +290,17 @@ export default function HabitsPage() {
                 >
                   <RestoreIcon width={13} height={13} />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setDeleting(habit)}
-                  aria-label={`Delete ${habit.name}`}
-                  title="Delete permanently (removes history and its earned XP)"
-                  className="rounded p-1 text-muted hover:text-danger"
-                >
-                  <TrashIcon width={13} height={13} />
-                </button>
+                {!habit.isSystem && (
+                  <button
+                    type="button"
+                    onClick={() => setDeleting(habit)}
+                    aria-label={`Delete ${habit.name}`}
+                    title="Delete permanently (removes history)"
+                    className="rounded p-1 text-muted hover:text-danger"
+                  >
+                    <TrashIcon width={13} height={13} />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -334,20 +319,12 @@ export default function HabitsPage() {
         <ConfirmDialog
           title={`Delete "${deleting.name}"`}
           message={`This action is permanent and cannot be undone. All completion history for "${deleting.name}" will be deleted along with it.${
-            deleteCompletions !== null && deleteCompletions > 0
-              ? ` It has earned ${deleteCompletions * deleting.points} pts / ${deleteCompletions * deleting.points * 10} XP across ${deleteCompletions} completion${deleteCompletions === 1 ? "" : "s"} — that XP will be removed from your totals, which may lower your level and break streaks.`
-              : ""
-          }${
-            deleting.isSystem
-              ? " This is a built-in habit: statistics and built-in achievements that reference it will no longer be computable."
-              : ""
-          }${
             blockedAchievements.length > 0
               ? ` Warning: the following locked custom achievements reference this habit and will become permanently unattainable unless you edit them first: ${blockedAchievements
                   .map((a) => `"${a.name}"`)
                   .join(", ")}.`
               : ""
-          }`}
+          } Already-earned totals, streaks, levels, and unlocked achievements are not affected.`}
           confirmLabel="Delete Permanently"
           busy={busy}
           onConfirm={() => void handleDelete()}

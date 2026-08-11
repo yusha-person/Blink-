@@ -20,6 +20,7 @@ pub const CONDITION_TYPES: &[&str] = &[
     "practice_pad_sessions",
     "notes_created",
     "tasks_completed",
+    "task_requirement",
 ];
 
 const HABIT_NAME_CONDITIONS: &[(&str, &str)] = &[
@@ -28,6 +29,14 @@ const HABIT_NAME_CONDITIONS: &[(&str, &str)] = &[
     ("chess_sessions", "Chess"),
     ("practice_pad_sessions", "Practice Pad"),
 ];
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedTask {
+    pub id: i64,
+    pub title: String,
+    pub completed_at: Option<String>,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +49,8 @@ pub struct CustomAchievementEntry {
     pub target: i64,
     pub habit_id: Option<i64>,
     pub habit_name: Option<String>,
+    pub combination_mode: String,
+    pub tasks: Vec<LinkedTask>,
     pub xp_reward: i64,
     pub point_reward: i64,
     pub progress: i64,
@@ -58,6 +69,8 @@ fn validate_input(
     condition_type: &str,
     target: i64,
     habit_id: Option<i64>,
+    task_ids: &[i64],
+    combination_mode: &str,
 ) -> Result<String, String> {
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -66,7 +79,14 @@ fn validate_input(
     if !CONDITION_TYPES.contains(&condition_type) {
         return Err(format!("invalid condition type '{condition_type}'"));
     }
-    if target <= 0 {
+    if condition_type == "task_requirement" {
+        if task_ids.is_empty() {
+            return Err("task requirement needs at least one linked task".to_string());
+        }
+        if !matches!(combination_mode, "all" | "any") {
+            return Err(format!("invalid combination mode '{combination_mode}'"));
+        }
+    } else if target <= 0 {
         return Err("target must be greater than 0".to_string());
     }
     if condition_type == "habit_count" && habit_id.is_none() {
@@ -170,11 +190,37 @@ fn condition_progress(
             if let Some((_, habit_name)) = HABIT_NAME_CONDITIONS.iter().find(|(c, _)| *c == other)
             {
                 named_habit_count(conn, habit_name)
+            } else if other == "task_requirement" {
+                // Handled by evaluate() via linked tasks, not a scalar stat.
+                Ok(0)
             } else {
                 Err(format!("unknown condition type '{other}'"))
             }
         }
     }
+}
+
+fn linked_tasks(conn: &Connection, achievement_id: i64) -> Result<Vec<LinkedTask>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT t.id, t.title, t.completed_at
+             FROM achievement_tasks at
+             JOIN tasks t ON t.id = at.task_id
+             WHERE at.achievement_id = ?1
+             ORDER BY t.id ASC",
+        )
+        .map_err(|e| format!("failed to prepare linked tasks query: {e}"))?;
+    let rows = stmt
+        .query_map([achievement_id], |row| {
+            Ok(LinkedTask {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                completed_at: row.get(2)?,
+            })
+        })
+        .map_err(|e| format!("failed to load linked tasks for {achievement_id}: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("failed to collect linked tasks for {achievement_id}: {e}"))
 }
 
 fn apply_reward(conn: &Connection, date: &str, points: i64, xp: i64) -> Result<(), String> {
@@ -206,6 +252,7 @@ struct RawRow {
     target: i64,
     habit_id: Option<i64>,
     habit_name: Option<String>,
+    combination_mode: String,
     xp_reward: i64,
     point_reward: i64,
     unlocked_at: Option<String>,
@@ -217,8 +264,8 @@ fn read_rows(conn: &Connection) -> Result<Vec<RawRow>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT a.id, a.name, a.description, a.icon, a.condition_type, a.target,
-                    a.habit_id, h.name, a.xp_reward, a.point_reward, a.unlocked_at,
-                    a.created_at, a.updated_at
+                    a.habit_id, h.name, a.combination_mode, a.xp_reward, a.point_reward,
+                    a.unlocked_at, a.created_at, a.updated_at
              FROM custom_achievements a
              LEFT JOIN habits h ON h.id = a.habit_id
              ORDER BY a.created_at ASC, a.id ASC",
@@ -235,11 +282,12 @@ fn read_rows(conn: &Connection) -> Result<Vec<RawRow>, String> {
                 target: row.get(5)?,
                 habit_id: row.get(6)?,
                 habit_name: row.get(7)?,
-                xp_reward: row.get(8)?,
-                point_reward: row.get(9)?,
-                unlocked_at: row.get(10)?,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
+                combination_mode: row.get(8)?,
+                xp_reward: row.get(9)?,
+                point_reward: row.get(10)?,
+                unlocked_at: row.get(11)?,
+                created_at: row.get(12)?,
+                updated_at: row.get(13)?,
             })
         })
         .map_err(|e| format!("failed to query custom achievements: {e}"))?;
@@ -258,9 +306,28 @@ fn evaluate(conn: &Connection) -> Result<Vec<CustomAchievementEntry>, String> {
     let rows = read_rows(conn)?;
     let mut entries = Vec::with_capacity(rows.len());
     for row in rows {
-        let progress = condition_progress(conn, &row.condition_type, row.habit_id, &today, today_naive)?;
+        let tasks = if row.condition_type == "task_requirement" {
+            linked_tasks(conn, row.id)?
+        } else {
+            Vec::new()
+        };
+        let (progress, target) = if row.condition_type == "task_requirement" {
+            let completed = tasks.iter().filter(|t| t.completed_at.is_some()).count() as i64;
+            if row.combination_mode == "any" {
+                (completed.min(1), 1)
+            } else {
+                (completed, (tasks.len() as i64).max(1))
+            }
+        } else {
+            (
+                condition_progress(conn, &row.condition_type, row.habit_id, &today, today_naive)?,
+                row.target,
+            )
+        };
         let mut unlocked_at = row.unlocked_at;
-        if unlocked_at.is_none() && progress >= row.target {
+        let can_unlock =
+            row.condition_type != "task_requirement" || !tasks.is_empty();
+        if unlocked_at.is_none() && can_unlock && progress >= target {
             conn.execute(
                 "UPDATE custom_achievements SET unlocked_at = ?1, updated_at = ?1 WHERE id = ?2",
                 rusqlite::params![now, row.id],
@@ -275,9 +342,11 @@ fn evaluate(conn: &Connection) -> Result<Vec<CustomAchievementEntry>, String> {
             description: row.description,
             icon: row.icon,
             condition_type: row.condition_type,
-            target: row.target,
+            target,
             habit_id: row.habit_id,
             habit_name: row.habit_name,
+            combination_mode: row.combination_mode,
+            tasks,
             xp_reward: row.xp_reward,
             point_reward: row.point_reward,
             progress,
@@ -298,6 +367,22 @@ pub fn list_custom_achievements(
     evaluate(&conn)
 }
 
+fn validate_task_ids(conn: &Connection, task_ids: &[i64]) -> Result<(), String> {
+    for id in task_ids {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("failed to check task {id}: {e}"))?;
+        if exists == 0 {
+            return Err(format!("task {id} not found"));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn create_custom_achievement(
     db: tauri::State<'_, Database>,
@@ -307,16 +392,30 @@ pub fn create_custom_achievement(
     condition_type: String,
     target: i64,
     habit_id: Option<i64>,
+    task_ids: Option<Vec<i64>>,
+    combination_mode: Option<String>,
     xp_reward: Option<i64>,
     point_reward: Option<i64>,
 ) -> Result<Vec<CustomAchievementEntry>, String> {
-    let name = validate_input(&name, &condition_type, target, habit_id)?;
-    let conn = db.conn()?;
+    let task_ids = task_ids.unwrap_or_default();
+    let combination_mode = combination_mode.unwrap_or_else(|| "all".to_string());
+    let name = validate_input(&name, &condition_type, target, habit_id, &task_ids, &combination_mode)?;
+    let target = if condition_type == "task_requirement" {
+        (task_ids.len() as i64).max(1)
+    } else {
+        target
+    };
+
+    let mut conn = db.conn()?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("failed to begin transaction: {e}"))?;
+    validate_task_ids(&tx, &task_ids)?;
     let now = now_string();
-    conn.execute(
+    tx.execute(
         "INSERT INTO custom_achievements
-            (name, description, icon, condition_type, target, habit_id, xp_reward, point_reward, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+            (name, description, icon, condition_type, target, habit_id, combination_mode, xp_reward, point_reward, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
         rusqlite::params![
             name,
             description.unwrap_or_default(),
@@ -324,12 +423,23 @@ pub fn create_custom_achievement(
             condition_type,
             target,
             habit_id,
+            combination_mode,
             xp_reward.unwrap_or(0).max(0),
             point_reward.unwrap_or(0).max(0),
             now
         ],
     )
     .map_err(|e| format!("failed to create custom achievement: {e}"))?;
+    let new_id = tx.last_insert_rowid();
+    for task_id in &task_ids {
+        tx.execute(
+            "INSERT INTO achievement_tasks (achievement_id, task_id) VALUES (?1, ?2)",
+            rusqlite::params![new_id, task_id],
+        )
+        .map_err(|e| format!("failed to link task {task_id}: {e}"))?;
+    }
+    tx.commit()
+        .map_err(|e| format!("failed to commit custom achievement: {e}"))?;
     evaluate(&conn)
 }
 
@@ -343,17 +453,31 @@ pub fn update_custom_achievement(
     condition_type: String,
     target: i64,
     habit_id: Option<i64>,
+    task_ids: Option<Vec<i64>>,
+    combination_mode: Option<String>,
     xp_reward: Option<i64>,
     point_reward: Option<i64>,
 ) -> Result<Vec<CustomAchievementEntry>, String> {
-    let name = validate_input(&name, &condition_type, target, habit_id)?;
-    let conn = db.conn()?;
-    let changed = conn
+    let task_ids = task_ids.unwrap_or_default();
+    let combination_mode = combination_mode.unwrap_or_else(|| "all".to_string());
+    let name = validate_input(&name, &condition_type, target, habit_id, &task_ids, &combination_mode)?;
+    let target = if condition_type == "task_requirement" {
+        (task_ids.len() as i64).max(1)
+    } else {
+        target
+    };
+
+    let mut conn = db.conn()?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("failed to begin transaction: {e}"))?;
+    validate_task_ids(&tx, &task_ids)?;
+    let changed = tx
         .execute(
             "UPDATE custom_achievements SET
                 name = ?1, description = ?2, icon = ?3, condition_type = ?4, target = ?5,
-                habit_id = ?6, xp_reward = ?7, point_reward = ?8, updated_at = ?9
-             WHERE id = ?10",
+                habit_id = ?6, combination_mode = ?7, xp_reward = ?8, point_reward = ?9, updated_at = ?10
+             WHERE id = ?11",
             rusqlite::params![
                 name,
                 description.unwrap_or_default(),
@@ -361,6 +485,7 @@ pub fn update_custom_achievement(
                 condition_type,
                 target,
                 habit_id,
+                combination_mode,
                 xp_reward.unwrap_or(0).max(0),
                 point_reward.unwrap_or(0).max(0),
                 now_string(),
@@ -371,6 +496,20 @@ pub fn update_custom_achievement(
     if changed == 0 {
         return Err(format!("custom achievement {id} not found"));
     }
+    tx.execute(
+        "DELETE FROM achievement_tasks WHERE achievement_id = ?1",
+        [id],
+    )
+    .map_err(|e| format!("failed to relink tasks for achievement {id}: {e}"))?;
+    for task_id in &task_ids {
+        tx.execute(
+            "INSERT INTO achievement_tasks (achievement_id, task_id) VALUES (?1, ?2)",
+            rusqlite::params![id, task_id],
+        )
+        .map_err(|e| format!("failed to link task {task_id}: {e}"))?;
+    }
+    tx.commit()
+        .map_err(|e| format!("failed to commit custom achievement update: {e}"))?;
     evaluate(&conn)
 }
 

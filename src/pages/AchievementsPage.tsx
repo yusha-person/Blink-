@@ -72,6 +72,8 @@ function CustomAchievementCard({
     achievement;
   const shownProgress = Math.min(progress, target);
   const unit = CONDITION_UNITS[conditionType];
+  const isTaskRequirement = conditionType === "task_requirement";
+  const isAnyChecklist = isTaskRequirement && achievement.combinationMode === "any";
   return (
     <div
       className={`glass-sm glass-hover group flex flex-col gap-3 p-4 ${
@@ -97,7 +99,12 @@ function CustomAchievementCard({
             {name}
           </span>
           <span className="text-xs text-slate-500 dark:text-slate-400">
-            {description.trim() || CONDITION_LABELS[conditionType]}
+            {description.trim() ||
+              (isTaskRequirement
+                ? achievement.combinationMode === "any"
+                  ? "Complete any one of the linked tasks"
+                  : "Complete all linked tasks"
+                : CONDITION_LABELS[conditionType])}
           </span>
         </div>
         <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
@@ -119,11 +126,40 @@ function CustomAchievementCard({
           </button>
         </span>
       </div>
-      <ProgressBar value={shownProgress} max={target} />
+      {isAnyChecklist ? (
+        <ul className="flex flex-col gap-1">
+          {achievement.tasks.map((task) => (
+            <li key={task.id} className="flex items-center gap-2 text-xs">
+              <span
+                className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border ${
+                  task.completedAt
+                    ? "border-accent bg-accent text-accent-text"
+                    : "border-border text-transparent"
+                }`}
+              >
+                <CheckIcon width={9} height={9} />
+              </span>
+              <span
+                className={
+                  task.completedAt
+                    ? "text-slate-500 line-through dark:text-slate-400"
+                    : "text-slate-700 dark:text-slate-300"
+                }
+              >
+                {task.title}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <ProgressBar value={shownProgress} max={target} />
+      )}
       <span className="text-xs text-slate-500 dark:text-slate-400">
         {unlocked && unlockedAt
           ? `Unlocked ${formatFullTimestamp(unlockedAt)}`
-          : `${shownProgress} / ${target} ${unit}`}
+          : isAnyChecklist
+            ? "Complete any one to unlock"
+            : `${shownProgress} / ${target} ${unit}`}
       </span>
     </div>
   );

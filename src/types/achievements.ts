@@ -20,7 +20,16 @@ export type CustomConditionType =
   | "chess_sessions"
   | "practice_pad_sessions"
   | "notes_created"
-  | "tasks_completed";
+  | "tasks_completed"
+  | "task_requirement";
+
+export type CombinationMode = "all" | "any";
+
+export interface LinkedTask {
+  id: number;
+  title: string;
+  completedAt: string | null;
+}
 
 export interface CustomAchievementEntry {
   id: number;
@@ -31,6 +40,8 @@ export interface CustomAchievementEntry {
   target: number;
   habitId: number | null;
   habitName: string | null;
+  combinationMode: CombinationMode;
+  tasks: LinkedTask[];
   xpReward: number;
   pointReward: number;
   progress: number;
@@ -47,6 +58,8 @@ export interface CustomAchievementInput {
   conditionType: CustomConditionType;
   target: number;
   habitId?: number | null;
+  taskIds?: number[];
+  combinationMode?: CombinationMode;
   xpReward?: number;
   pointReward?: number;
 }
@@ -64,6 +77,7 @@ export const CONDITION_LABELS: Record<CustomConditionType, string> = {
   practice_pad_sessions: "Practice Pad sessions",
   notes_created: "Notes created",
   tasks_completed: "Tasks completed",
+  task_requirement: "Task requirement",
 };
 
 export const CONDITION_UNITS: Record<CustomConditionType, string> = {
@@ -79,4 +93,5 @@ export const CONDITION_UNITS: Record<CustomConditionType, string> = {
   practice_pad_sessions: "sessions",
   notes_created: "notes",
   tasks_completed: "tasks",
+  task_requirement: "tasks completed",
 };

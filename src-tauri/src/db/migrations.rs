@@ -222,6 +222,49 @@ pub const MIGRATIONS: &[Migration] = &[
         ALTER TABLE habits ADD COLUMN archived_at TEXT;
     "#,
     },
+    Migration {
+        version: 9,
+        name: "task-based achievements",
+        sql: r#"
+        CREATE TABLE custom_achievements_new (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            name             TEXT NOT NULL,
+            description      TEXT NOT NULL DEFAULT '',
+            icon             TEXT NOT NULL DEFAULT '🏆',
+            condition_type   TEXT NOT NULL CHECK (condition_type IN (
+                'total_xp', 'total_points', 'habits_completed', 'habit_count',
+                'current_streak', 'longest_streak', 'pages_read',
+                'meditation_sessions', 'chess_sessions', 'practice_pad_sessions',
+                'notes_created', 'tasks_completed', 'task_requirement'
+            )),
+            target           INTEGER NOT NULL CHECK (target > 0),
+            habit_id         INTEGER REFERENCES habits(id),
+            combination_mode TEXT NOT NULL DEFAULT 'all'
+                CHECK (combination_mode IN ('all', 'any')),
+            xp_reward        INTEGER NOT NULL DEFAULT 0 CHECK (xp_reward >= 0),
+            point_reward     INTEGER NOT NULL DEFAULT 0 CHECK (point_reward >= 0),
+            unlocked_at      TEXT,
+            created_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        INSERT INTO custom_achievements_new
+            (id, name, description, icon, condition_type, target, habit_id,
+             xp_reward, point_reward, unlocked_at, created_at, updated_at)
+            SELECT id, name, description, icon, condition_type, target, habit_id,
+                   xp_reward, point_reward, unlocked_at, created_at, updated_at
+            FROM custom_achievements;
+
+        DROP TABLE custom_achievements;
+        ALTER TABLE custom_achievements_new RENAME TO custom_achievements;
+
+        CREATE TABLE IF NOT EXISTS achievement_tasks (
+            achievement_id INTEGER NOT NULL REFERENCES custom_achievements(id) ON DELETE CASCADE,
+            task_id        INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            PRIMARY KEY (achievement_id, task_id)
+        );
+    "#,
+    },
 ];
 
 pub fn current_version(conn: &Connection) -> Result<u32, String> {

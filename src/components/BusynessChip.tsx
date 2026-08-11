@@ -4,7 +4,6 @@ import {
   computeBusyness,
   type BusynessBreakdown,
 } from "../config/busyness";
-import { useHabitStore } from "../stores/habitStore";
 import { useTaskStore } from "../stores/taskStore";
 
 const LEVEL_STYLES: Record<string, string> = {
@@ -19,17 +18,15 @@ export function useBusyness(day: string): BusynessBreakdown | null {
   const tasks = useTaskStore((s) => s.tasks);
   const tasksHydrated = useTaskStore((s) => s.hydrated);
   const hydrateTasks = useTaskStore((s) => s.hydrate);
-  const habits = useHabitStore((s) => s.habits);
-  const habitsHydrated = useHabitStore((s) => s.hydrated);
 
   useEffect(() => {
     if (!tasksHydrated) void hydrateTasks();
   }, [tasksHydrated, hydrateTasks]);
 
   return useMemo(() => {
-    if (!tasksHydrated || !habitsHydrated) return null;
-    return computeBusyness(tasks, habits, day);
-  }, [tasks, habits, day, tasksHydrated, habitsHydrated]);
+    if (!tasksHydrated) return null;
+    return computeBusyness(tasks, day);
+  }, [tasks, day, tasksHydrated]);
 }
 
 function BreakdownDialog({
@@ -76,10 +73,6 @@ function BreakdownDialog({
           <p>
             <span className="font-medium">Tasks ({breakdown.taskCount}):</span>{" "}
             {priorityLine(breakdown.tasksByPriority)}
-          </p>
-          <p>
-            <span className="font-medium">Habits ({breakdown.habitCount} active):</span>{" "}
-            {priorityLine(breakdown.habitsByPriority)}
           </p>
         </div>
         <p className="border-t border-border pt-2 text-xs leading-relaxed text-muted">

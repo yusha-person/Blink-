@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useHabitStore } from "../stores/habitStore";
+import { useTaskStore } from "../stores/taskStore";
 import {
   CONDITION_LABELS,
+  type CombinationMode,
   type CustomAchievementEntry,
   type CustomAchievementInput,
   type CustomConditionType,
@@ -30,6 +32,9 @@ export default function AchievementDialog({
   onCancel: () => void;
 }) {
   const habits = useHabitStore((s) => s.habits);
+  const tasks = useTaskStore((s) => s.tasks);
+  const tasksHydrated = useTaskStore((s) => s.hydrated);
+  const hydrateTasks = useTaskStore((s) => s.hydrate);
   const [name, setName] = useState(achievement?.name ?? "");
   const [description, setDescription] = useState(achievement?.description ?? "");
   const [icon, setIcon] = useState(achievement?.icon ?? "🏆");
@@ -39,9 +44,19 @@ export default function AchievementDialog({
   const [habitId, setHabitId] = useState<string>(
     achievement?.habitId != null ? String(achievement.habitId) : "",
   );
+  const [taskIds, setTaskIds] = useState<number[]>(
+    achievement?.tasks.map((t) => t.id) ?? [],
+  );
+  const [combinationMode, setCombinationMode] = useState<CombinationMode>(
+    achievement?.combinationMode ?? "all",
+  );
   const [target, setTarget] = useState(String(achievement?.target ?? 10));
   const [xpReward, setXpReward] = useState(String(achievement?.xpReward ?? 0));
   const [pointReward, setPointReward] = useState(String(achievement?.pointReward ?? 0));
+
+  useEffect(() => {
+    if (!tasksHydrated) void hydrateTasks();
+  }, [tasksHydrated, hydrateTasks]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -53,10 +68,12 @@ export default function AchievementDialog({
 
   const targetNum = Number(target);
   const needsHabit = conditionType === "habit_count";
+  const isTaskRequirement = conditionType === "task_requirement";
   const canSave =
     name.trim().length > 0 &&
-    Number.isInteger(targetNum) &&
-    targetNum > 0 &&
+    (isTaskRequirement
+      ? taskIds.length > 0
+      : Number.isInteger(targetNum) && targetNum > 0) &&
     (!needsHabit || habitId !== "") &&
     !busy;
 
@@ -67,8 +84,10 @@ export default function AchievementDialog({
       description: description.trim(),
       icon,
       conditionType,
-      target: targetNum,
+      target: isTaskRequirement ? Math.max(1, taskIds.length) : targetNum,
       habitId: needsHabit && habitId ? Number(habitId) : null,
+      taskIds: isTaskRequirement ? taskIds : [],
+      combinationMode,
       xpReward: Math.max(0, Number(xpReward) || 0),
       pointReward: Math.max(0, Number(pointReward) || 0),
     });
@@ -141,17 +160,69 @@ export default function AchievementDialog({
               ))}
             </select>
           </label>
-          <label className="flex w-24 flex-col gap-1">
-            <span className="text-xs text-muted">Target</span>
-            <input
-              type="number"
-              min={1}
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              className={inputClass}
-            />
-          </label>
+          {!isTaskRequirement && (
+            <label className="flex w-24 flex-col gap-1">
+              <span className="text-xs text-muted">Target</span>
+              <input
+                type="number"
+                min={1}
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                className={inputClass}
+              />
+            </label>
+          )}
         </div>
+
+        {isTaskRequirement && (
+          <div className="flex flex-col gap-2">
+            <span className="text-xs text-muted">Linked tasks ({taskIds.length} selected)</span>
+            <div className="flex gap-3">
+              {(["all", "any"] as const).map((mode) => (
+                <label key={mode} className="flex items-center gap-1.5 text-xs text-text">
+                  <input
+                    type="radio"
+                    name="combination-mode"
+                    checked={combinationMode === mode}
+                    onChange={() => setCombinationMode(mode)}
+                    className="accent-accent"
+                  />
+                  {mode === "all" ? "Complete ALL" : "Complete ANY one"}
+                </label>
+              ))}
+            </div>
+            <div className="flex max-h-36 flex-col gap-1 overflow-y-auto rounded-lg border border-border bg-surface p-2">
+              {tasks.length === 0 ? (
+                <p className="px-1 py-2 text-xs text-muted">
+                  No tasks yet — create tasks first, then link them here.
+                </p>
+              ) : (
+                tasks.map((task) => (
+                  <label
+                    key={task.id}
+                    className="flex items-center gap-2 rounded px-1.5 py-1 text-xs text-text hover:bg-surface-hover"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={taskIds.includes(task.id)}
+                      onChange={() =>
+                        setTaskIds((prev) =>
+                          prev.includes(task.id)
+                            ? prev.filter((id) => id !== task.id)
+                            : [...prev, task.id],
+                        )
+                      }
+                      className="accent-accent"
+                    />
+                    <span className={task.completedAt ? "text-muted line-through" : ""}>
+                      {task.title}
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+        )}
 
         {needsHabit && (
           <label className="flex flex-col gap-1">

@@ -3,6 +3,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import TaskDialog from "../components/TaskDialog";
 import { TaskRow } from "../components/TaskRow";
 import { PlusIcon } from "../components/icons";
+import { useAchievementStore } from "../stores/achievementStore";
 import { useTaskStore, type TaskInput } from "../stores/taskStore";
 import type { TaskEntry, TaskFilter, TaskSortBy } from "../types/tasks";
 import { groupTasks, sortTasks } from "../utils/tasks";
@@ -91,6 +92,23 @@ export default function TasksPage() {
     void hydrate();
   }, [hydrate]);
 
+  const customAchievements = useAchievementStore((s) => s.customAchievements);
+  const achievementsHydrated = useAchievementStore((s) => s.hydrated);
+  const hydrateAchievements = useAchievementStore((s) => s.hydrate);
+  const deleteCustomAchievement = useAchievementStore((s) => s.deleteCustom);
+
+  useEffect(() => {
+    if (!achievementsHydrated) void hydrateAchievements();
+  }, [achievementsHydrated, hydrateAchievements]);
+
+  const linkedAchievements = useMemo(() => {
+    if (!deleting) return [];
+    return customAchievements.filter(
+      (a) => a.conditionType === "task_requirement" && a.tasks.some((t) => t.id === deleting.id),
+    );
+  }, [deleting, customAchievements]);
+  const soleLinked = linkedAchievements.filter((a) => a.tasks.length <= 1);
+
   const today = localDateString();
 
   const visible = useMemo(() => {
@@ -127,6 +145,9 @@ export default function TasksPage() {
     if (!deleting) return;
     setBusy(true);
     try {
+      for (const achievement of soleLinked) {
+        await deleteCustomAchievement(achievement.id);
+      }
       await deleteTask(deleting.id);
       setDeleting(null);
     } finally {
@@ -232,7 +253,27 @@ export default function TasksPage() {
       {deleting && (
         <ConfirmDialog
           title="Delete task"
-          message={`Permanently delete "${deleting.title}"? This cannot be undone.`}
+          message={(() => {
+            const base = `Permanently delete "${deleting.title}"? This cannot be undone.`;
+            if (linkedAchievements.length === 0) return base;
+            const names = linkedAchievements.map((a) => `"${a.name}"`).join(", ");
+            if (soleLinked.length > 0) {
+              const soleNames = soleLinked.map((a) => `"${a.name}"`).join(", ");
+              return `${base} It is the only requirement of achievement ${soleNames} — deleting the task will delete ${soleLinked.length === 1 ? "that achievement" : "those achievements"} too, since an achievement cannot have zero requirements.${
+                soleLinked.length < linkedAchievements.length
+                  ? ` It will also be removed from achievement ${names}.`
+                  : ""
+              }`;
+            }
+            return `${base} It is linked to achievement ${names}; deleting it will remove the task from ${linkedAchievements.length === 1 ? "that achievement" : "those achievements"}.`;
+          })()}
+          confirmLabel={
+            linkedAchievements.length === 0
+              ? "Delete"
+              : soleLinked.length > 0
+                ? "Delete Task & Achievement"
+                : "Remove Link & Delete"
+          }
           busy={busy}
           onConfirm={() => void handleDelete()}
           onCancel={() => setDeleting(null)}
