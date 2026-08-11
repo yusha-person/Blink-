@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNoteStore } from "../stores/noteStore";
+import { usePrivacyStore } from "../stores/privacyStore";
 
 export default function FolderDialog() {
   const dialog = useNoteStore((s) => s.folderDialog);
@@ -7,12 +8,22 @@ export default function FolderDialog() {
   const createFolder = useNoteStore((s) => s.createFolder);
   const renameFolder = useNoteStore((s) => s.renameFolder);
   const folders = useNoteStore((s) => s.folders);
+  const setFolderPassword = usePrivacyStore((s) => s.setFolderPassword);
+  const privacyStatus = usePrivacyStore((s) => s.status);
 
   const [name, setName] = useState("");
+  const [protect, setProtect] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [protectError, setProtectError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setName(dialog?.mode === "rename" ? dialog.folder.name : "");
+    setProtect(false);
+    setPassword("");
+    setConfirm("");
+    setProtectError(null);
   }, [dialog]);
 
   useEffect(() => {
@@ -30,12 +41,29 @@ export default function FolderDialog() {
       ? folders.find((f) => f.id === dialog.parentId)?.name
       : null;
 
+  const passwordMismatch = protect && password !== confirm;
+  const canSave =
+    name.trim().length > 0 &&
+    !busy &&
+    (dialog.mode === "rename" ||
+      !protect ||
+      (password.length >= 4 && !passwordMismatch));
+
   const save = async () => {
-    if (!name.trim() || busy) return;
+    if (!canSave) return;
     setBusy(true);
     try {
       if (dialog.mode === "create") {
-        await createFolder(name.trim(), dialog.parentId);
+        const folder = await createFolder(name.trim(), dialog.parentId);
+        if (folder && protect) {
+          const ok = await setFolderPassword(folder.id, password);
+          if (!ok) {
+            setProtectError(
+              "Folder was created but could not be protected. Set up the master password in Settings first, then add a password from the folder's menu.",
+            );
+            return;
+          }
+        }
       } else {
         await renameFolder(dialog.folder.id, name.trim());
       }
@@ -73,6 +101,46 @@ export default function FolderDialog() {
           placeholder="Folder name"
           className="w-full select-text rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-text outline-none transition-colors placeholder:text-muted focus:border-accent/50"
         />
+        {dialog.mode === "create" && (
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 text-xs text-text">
+              <input
+                type="checkbox"
+                checked={protect}
+                onChange={(e) => setProtect(e.target.checked)}
+                className="accent-accent"
+              />
+              Protect this folder with a password
+            </label>
+            {protect && (
+              <>
+                {!privacyStatus?.passwordSet && (
+                  <p className="text-xs text-warning">
+                    No master password is set yet — set one in Settings → Private Notes first.
+                  </p>
+                )}
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Folder password (min 4 chars)"
+                  className="w-full select-text rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-text outline-none transition-colors placeholder:text-muted focus:border-accent/50"
+                />
+                <input
+                  type="password"
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  placeholder="Confirm password"
+                  className="w-full select-text rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-text outline-none transition-colors placeholder:text-muted focus:border-accent/50"
+                />
+                {passwordMismatch && confirm.length > 0 && (
+                  <p className="text-xs text-danger">Passwords do not match.</p>
+                )}
+              </>
+            )}
+            {protectError && <p className="text-xs text-warning">{protectError}</p>}
+          </div>
+        )}
         <div className="mt-1 flex justify-end gap-2">
           <button
             type="button"
@@ -85,10 +153,10 @@ export default function FolderDialog() {
           <button
             type="button"
             onClick={() => void save()}
-            disabled={!name.trim() || busy}
+            disabled={!canSave}
             className="rounded-lg border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent/25 disabled:opacity-60"
           >
-            {busy ? "Saving…" : dialog.mode === "create" ? "Create" : "Rename"}
+            {busy ? "Saving…" : dialog.mode === "create" ? "Create Folder" : "Rename"}
           </button>
         </div>
       </div>

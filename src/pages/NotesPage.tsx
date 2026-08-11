@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import NoteEditor from "../components/NoteEditor";
 import FolderDialog from "../components/FolderDialog";
 import DeleteFolderDialog from "../components/DeleteFolderDialog";
+import FolderPasswordDialog from "../components/FolderPasswordDialog";
 import FolderTree, { NOTE_DRAG_TYPE } from "../components/FolderTree";
 import {
   LockIcon,
@@ -340,6 +341,7 @@ export default function NotesPage() {
       </section>
       <FolderDialog />
       <DeleteFolderDialog />
+      <FolderPasswordDialog />
     </div>
   );
 }

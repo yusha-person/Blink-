@@ -5,9 +5,67 @@ use serde::Serialize;
 use crate::crypto::{self, CryptoState};
 use crate::db::Database;
 
+#[allow(dead_code)]
 pub const QUICK_NOTES_FOLDER: &str = "Quick Notes";
 pub const LOCKED_NOTE_TITLE: &str = "Private note";
 pub const MAX_FOLDER_DEPTH: i64 = 5;
+
+/// Effective encryption state of a note: plaintext, decryptable now, or locked.
+pub enum NoteProtection {
+    None,
+    Unlocked([u8; crypto::KEY_LEN]),
+    Locked,
+}
+
+/// Nearest protected folder at or above `folder_id` (folder password protection
+/// cascades down the tree). Returns the protected folder's id.
+pub fn protecting_folder_id(conn: &Connection, folder_id: i64) -> Result<Option<i64>, String> {
+    let mut current = folder_id;
+    let mut hops = 0;
+    loop {
+        let row: Option<(i64, i64)> = conn
+            .query_row(
+                "SELECT parent_id, is_protected FROM folders WHERE id = ?1",
+                [current],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| format!("failed to read folder {current}: {e}"))?;
+        match row {
+            None => return Ok(None),
+            Some((_, protected)) if protected != 0 => return Ok(Some(current)),
+            Some((parent, _)) if parent == 0 => return Ok(None),
+            Some((parent, _)) => {
+                hops += 1;
+                if hops > MAX_FOLDER_DEPTH + 1 {
+                    return Err("folder tree is deeper than the supported maximum".to_string());
+                }
+                current = parent;
+            }
+        }
+    }
+}
+
+pub fn note_protection(
+    conn: &Connection,
+    crypto: &CryptoState,
+    folder_id: i64,
+    is_private: bool,
+) -> Result<NoteProtection, String> {
+    if is_private {
+        return Ok(match crypto.key() {
+            Some(key) => NoteProtection::Unlocked(key),
+            None => NoteProtection::Locked,
+        });
+    }
+    match protecting_folder_id(conn, folder_id)? {
+        Some(fid) => Ok(match crypto.folder_key(fid) {
+            Some(key) => NoteProtection::Unlocked(key),
+            None => NoteProtection::Locked,
+        }),
+        None => Ok(NoteProtection::None),
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,11 +75,9 @@ pub struct FolderEntry {
     pub parent_id: i64,
     pub sort_order: i64,
     pub is_system: bool,
+    pub is_protected: bool,
+    pub locked: bool,
     pub note_count: i64,
-}
-
-fn session_key(crypto: &tauri::State<'_, CryptoState>) -> Option<[u8; crypto::KEY_LEN]> {
-    crypto.inner().key()
 }
 
 #[derive(Serialize)]
@@ -121,18 +177,18 @@ fn map_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
 fn decrypt_summary(
     conn: &Connection,
     note: &mut NoteSummary,
-    key: Option<&[u8; crypto::KEY_LEN]>,
+    crypto: &CryptoState,
 ) -> Result<(), String> {
-    if !note.is_private {
-        return Ok(());
-    }
-    match key {
-        None => {
+    match note_protection(conn, crypto, note.folder_id, note.is_private)? {
+        NoteProtection::None => Ok(()),
+        NoteProtection::Locked => {
             note.title = LOCKED_NOTE_TITLE.to_string();
             note.preview = String::new();
+            note.tags = Vec::new();
+            Ok(())
         }
-        Some(key) => {
-            note.title = crypto::decrypt(key, &note.title)
+        NoteProtection::Unlocked(key) => {
+            note.title = crypto::decrypt(&key, &note.title)
                 .map_err(|e| format!("failed to decrypt note {} title: {e}", note.id))?;
             let content: String = conn
                 .query_row(
@@ -141,19 +197,19 @@ fn decrypt_summary(
                     |row| row.get(0),
                 )
                 .map_err(|e| format!("failed to load note {} content: {e}", note.id))?;
-            let plain = crypto::decrypt(key, &content)
+            let plain = crypto::decrypt(&key, &content)
                 .map_err(|e| format!("failed to decrypt note {} content: {e}", note.id))?;
             note.preview = plain.chars().take(200).collect();
+            Ok(())
         }
     }
-    Ok(())
 }
 
 fn query_summaries(
     conn: &Connection,
     where_clause: &str,
     params: &[&dyn rusqlite::ToSql],
-    key: Option<&[u8; crypto::KEY_LEN]>,
+    crypto: &CryptoState,
 ) -> Result<Vec<NoteSummary>, String> {
     let sql = format!(
         "SELECT {NOTE_COLUMNS}
@@ -174,7 +230,7 @@ fn query_summaries(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("failed to list notes: {e}"))?;
     for note in notes.iter_mut() {
-        decrypt_summary(conn, note, key)?;
+        decrypt_summary(conn, note, crypto)?;
     }
     Ok(notes)
 }
@@ -182,7 +238,7 @@ fn query_summaries(
 fn note_summary(
     conn: &Connection,
     note_id: i64,
-    key: Option<&[u8; crypto::KEY_LEN]>,
+    crypto: &CryptoState,
 ) -> Result<NoteSummary, String> {
     let sql = format!(
         "SELECT {NOTE_COLUMNS}
@@ -198,7 +254,7 @@ fn note_summary(
             rusqlite::Error::QueryReturnedNoRows => format!("note {note_id} not found"),
             other => format!("failed to load note {note_id}: {other}"),
         })?;
-    decrypt_summary(conn, &mut note, key)?;
+    decrypt_summary(conn, &mut note, crypto)?;
     Ok(note)
 }
 
@@ -221,7 +277,7 @@ fn note_tags(conn: &Connection, note_id: i64) -> Result<Vec<String>, String> {
 fn note_detail(
     conn: &Connection,
     note_id: i64,
-    key: Option<&[u8; crypto::KEY_LEN]>,
+    crypto: &CryptoState,
 ) -> Result<NoteDetail, String> {
     let mut note = conn
         .query_row(
@@ -248,18 +304,17 @@ fn note_detail(
             rusqlite::Error::QueryReturnedNoRows => format!("note {note_id} not found"),
             other => format!("failed to load note {note_id}: {other}"),
         })?;
-    if note.is_private {
-        match key {
-            None => {
-                note.title = LOCKED_NOTE_TITLE.to_string();
-                note.content = String::new();
-            }
-            Some(key) => {
-                note.title = crypto::decrypt(key, &note.title)
-                    .map_err(|e| format!("failed to decrypt note {note_id} title: {e}"))?;
-                note.content = crypto::decrypt(key, &note.content)
-                    .map_err(|e| format!("failed to decrypt note {note_id} content: {e}"))?;
-            }
+    match note_protection(conn, crypto, note.folder_id, note.is_private)? {
+        NoteProtection::None => {}
+        NoteProtection::Locked => {
+            note.title = LOCKED_NOTE_TITLE.to_string();
+            note.content = String::new();
+        }
+        NoteProtection::Unlocked(key) => {
+            note.title = crypto::decrypt(&key, &note.title)
+                .map_err(|e| format!("failed to decrypt note {note_id} title: {e}"))?;
+            note.content = crypto::decrypt(&key, &note.content)
+                .map_err(|e| format!("failed to decrypt note {note_id} content: {e}"))?;
         }
     }
     Ok(NoteDetail {
@@ -276,25 +331,42 @@ fn normalize_folder_name(name: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
-fn folder_entry(row: &rusqlite::Row) -> rusqlite::Result<FolderEntry> {
-    Ok(FolderEntry {
-        id: row.get(0)?,
-        name: row.get(1)?,
-        parent_id: row.get(2)?,
-        sort_order: row.get(3)?,
-        is_system: row.get::<_, i64>(4)? != 0,
-        note_count: row.get(5)?,
-    })
+fn folder_entry_with(crypto: &CryptoState) -> impl Fn(&rusqlite::Row) -> rusqlite::Result<FolderEntry> + '_ {
+    move |row| {
+        let is_protected = row.get::<_, i64>(5)? != 0;
+        let id = row.get(0)?;
+        Ok(FolderEntry {
+            id,
+            name: row.get(1)?,
+            parent_id: row.get(2)?,
+            sort_order: row.get(3)?,
+            is_system: row.get::<_, i64>(4)? != 0,
+            is_protected,
+            locked: is_protected && crypto.folder_key(id).is_none(),
+            note_count: row.get(6)?,
+        })
+    }
 }
 
 const FOLDER_COLUMNS: &str =
-    "f.id, f.name, f.parent_id, f.sort_order, f.is_system, (SELECT COUNT(*) FROM notes n WHERE n.folder_id = f.id AND n.trashed_at IS NULL)";
+    "f.id, f.name, f.parent_id, f.sort_order, f.is_system, f.is_protected, (SELECT COUNT(*) FROM notes n WHERE n.folder_id = f.id AND n.trashed_at IS NULL)";
 
 fn get_folder_entry(conn: &Connection, id: i64) -> Result<FolderEntry, String> {
     conn.query_row(
         &format!("SELECT {FOLDER_COLUMNS} FROM folders f WHERE f.id = ?1"),
         [id],
-        folder_entry,
+        |row| {
+            Ok(FolderEntry {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                parent_id: row.get(2)?,
+                sort_order: row.get(3)?,
+                is_system: row.get::<_, i64>(4)? != 0,
+                is_protected: row.get::<_, i64>(5)? != 0,
+                locked: false,
+                note_count: row.get(6)?,
+            })
+        },
     )
     .map_err(|e| match e {
         rusqlite::Error::QueryReturnedNoRows => format!("folder {id} not found"),
@@ -343,7 +415,7 @@ fn subtree_height(conn: &Connection, id: i64) -> Result<i64, String> {
 }
 
 /// All folder ids in the subtree rooted at `id`, including `id` itself.
-fn subtree_ids(conn: &Connection, id: i64) -> Result<Vec<i64>, String> {
+pub fn subtree_ids(conn: &Connection, id: i64) -> Result<Vec<i64>, String> {
     let mut stmt = conn
         .prepare(
             "WITH RECURSIVE subtree(id) AS (
@@ -373,7 +445,10 @@ fn is_duplicate_folder_error(e: &rusqlite::Error, name: &str) -> String {
 }
 
 #[tauri::command]
-pub fn list_folders(db: tauri::State<'_, Database>) -> Result<Vec<FolderEntry>, String> {
+pub fn list_folders(
+    db: tauri::State<'_, Database>,
+    crypto: tauri::State<'_, CryptoState>,
+) -> Result<Vec<FolderEntry>, String> {
     let conn = db.conn()?;
     let mut stmt = conn
         .prepare(&format!(
@@ -381,7 +456,7 @@ pub fn list_folders(db: tauri::State<'_, Database>) -> Result<Vec<FolderEntry>, 
         ))
         .map_err(|e| format!("failed to prepare folder query: {e}"))?;
     let rows = stmt
-        .query_map([], folder_entry)
+        .query_map([], folder_entry_with(crypto.inner()))
         .map_err(|e| format!("failed to list folders: {e}"))?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("failed to list folders: {e}"))
@@ -443,9 +518,75 @@ pub fn rename_folder(
 
 /// Moves a folder to a new parent (0 = root) at the given sibling index,
 /// then normalizes the sort_order of the new parent's children to 1..n.
+/// Re-encrypts all non-private notes in the given folders when their effective
+/// protection context changes (move/promote/delete across a boundary).
+fn reencrypt_subtree_between(
+    conn: &Connection,
+    crypto: &CryptoState,
+    folder_ids: &[i64],
+    old_ctx: Option<i64>,
+    new_ctx: Option<i64>,
+) -> Result<(), String> {
+    let old_key = match old_ctx {
+        Some(id) => Some(crypto.folder_key(id).ok_or_else(|| {
+            "unlock the protected folder before moving it".to_string()
+        })?),
+        None => None,
+    };
+    let new_key = match new_ctx {
+        Some(id) => Some(crypto.folder_key(id).ok_or_else(|| {
+            "unlock the destination folder before moving notes into it".to_string()
+        })?),
+        None => None,
+    };
+    let placeholders = folder_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT id, title, content FROM notes
+             WHERE folder_id IN ({placeholders}) AND is_private = 0"
+        ))
+        .map_err(|e| format!("failed to prepare re-encryption: {e}"))?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(folder_ids.iter()), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| format!("failed to read notes for re-encryption: {e}"))?;
+    for row in rows {
+        let (id, title, content) =
+            row.map_err(|e| format!("failed to read notes for re-encryption: {e}"))?;
+        let (plain_title, plain_content) = match &old_key {
+            Some(key) if title.starts_with(crypto::ENC_PREFIX) => (
+                crypto::decrypt(key, &title)
+                    .map_err(|e| format!("failed to decrypt note {id}: {e}"))?,
+                crypto::decrypt(key, &content)
+                    .map_err(|e| format!("failed to decrypt note {id}: {e}"))?,
+            ),
+            _ => (title, content),
+        };
+        let (stored_title, stored_content) = match &new_key {
+            Some(key) => (
+                crypto::encrypt(key, &plain_title)?,
+                crypto::encrypt(key, &plain_content)?,
+            ),
+            None => (plain_title, plain_content),
+        };
+        conn.execute(
+            "UPDATE notes SET title = ?1, content = ?2 WHERE id = ?3",
+            rusqlite::params![stored_title, stored_content, id],
+        )
+        .map_err(|e| format!("failed to re-encrypt note {id}: {e}"))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn move_folder(
     db: tauri::State<'_, Database>,
+    crypto: tauri::State<'_, CryptoState>,
     folder_id: i64,
     new_parent_id: i64,
     new_index: Option<i64>,
@@ -503,6 +644,32 @@ pub fn move_folder(
         .clamp(0, siblings.len() as i64) as usize;
     siblings.insert(index, folder_id);
 
+    // Re-encrypt subtree notes when the move crosses a protection boundary
+    // (only for folders not independently protected — those carry their own key).
+    let self_protected: i64 = tx
+        .query_row(
+            "SELECT is_protected FROM folders WHERE id = ?1",
+            [folder_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("failed to load folder {folder_id}: {e}"))?;
+    if self_protected == 0 {
+        let old_ctx = if old_parent == 0 {
+            None
+        } else {
+            protecting_folder_id(&tx, old_parent)?
+        };
+        let new_ctx = if new_parent_id == 0 {
+            None
+        } else {
+            protecting_folder_id(&tx, new_parent_id)?
+        };
+        if old_ctx != new_ctx {
+            let subtree = subtree_ids(&tx, folder_id)?;
+            reencrypt_subtree_between(&tx, crypto.inner(), &subtree, old_ctx, new_ctx)?;
+        }
+    }
+
     tx.execute(
         "UPDATE folders SET parent_id = ?1 WHERE id = ?2",
         rusqlite::params![new_parent_id, folder_id],
@@ -536,6 +703,7 @@ pub fn move_folder(
 #[tauri::command]
 pub fn delete_folder(
     db: tauri::State<'_, Database>,
+    crypto: tauri::State<'_, CryptoState>,
     folder_id: i64,
     notes_destination_id: Option<i64>,
     subfolder_action: Option<String>,
@@ -589,6 +757,12 @@ pub fn delete_folder(
             return Err("notes cannot be moved into a folder that is being deleted".to_string());
         }
         get_folder_entry(&tx, destination)?;
+        // Re-encrypt relocated notes if the protection context differs.
+        let source_ctx = protecting_folder_id(&tx, folder_id)?;
+        let dest_ctx = protecting_folder_id(&tx, destination)?;
+        if source_ctx != dest_ctx {
+            reencrypt_subtree_between(&tx, crypto.inner(), affected, source_ctx, dest_ctx)?;
+        }
         let mut move_params: Vec<rusqlite::types::Value> = Vec::new();
         move_params.push(destination.into());
         move_params.push(now_local().into());
@@ -603,6 +777,35 @@ pub fn delete_folder(
     }
 
     if action == "promote" {
+        // Promoted children may lose (or change) their inherited protection.
+        let new_ctx = if parent_id == 0 {
+            None
+        } else {
+            protecting_folder_id(&tx, parent_id)?
+        };
+        let children: Vec<i64> = {
+            let mut stmt = tx
+                .prepare("SELECT id, is_protected FROM folders WHERE parent_id = ?1")
+                .map_err(|e| format!("failed to prepare child query: {e}"))?;
+            let rows = stmt
+                .query_map([folder_id], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|e| format!("failed to list child folders: {e}"))?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("failed to collect child folders: {e}"))?
+                .into_iter()
+                .filter(|(_, protected)| *protected == 0)
+                .map(|(id, _)| id)
+                .collect()
+        };
+        for child_id in children {
+            let child_subtree = subtree_ids(&tx, child_id)?;
+            let old_ctx = protecting_folder_id(&tx, folder_id)?;
+            if old_ctx != new_ctx {
+                reencrypt_subtree_between(&tx, crypto.inner(), &child_subtree, old_ctx, new_ctx)?;
+            }
+        }
         tx.execute(
             "UPDATE folders SET parent_id = ?1 WHERE parent_id = ?2",
             rusqlite::params![parent_id, folder_id],
@@ -638,7 +841,6 @@ pub fn list_notes(
     trashed: Option<bool>,
 ) -> Result<Vec<NoteSummary>, String> {
     let conn = db.conn()?;
-    let key = session_key(&crypto);
     let mut conditions: Vec<String> = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -657,7 +859,7 @@ pub fn list_notes(
 
     let where_clause = format!("WHERE {}", conditions.join(" AND "));
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    query_summaries(&conn, &where_clause, &param_refs, key.as_ref())
+    query_summaries(&conn, &where_clause, &param_refs, crypto.inner())
 }
 
 #[tauri::command]
@@ -667,7 +869,6 @@ pub fn search_notes(
     query: String,
 ) -> Result<Vec<NoteSummary>, String> {
     let conn = db.conn()?;
-    let key = session_key(&crypto);
     let pattern = format!("%{}%", escape_like(&query));
     let mut results = query_summaries(
         &conn,
@@ -675,41 +876,55 @@ pub fn search_notes(
            AND n.is_private = 0
            AND (n.title LIKE ?1 ESCAPE '\\' OR n.content LIKE ?1 ESCAPE '\\')",
         &[&pattern],
-        key.as_ref(),
+        crypto.inner(),
     )?;
 
-    if let Some(key) = key.as_ref() {
-        let needle = query.trim().to_lowercase();
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, title, content FROM notes
-                 WHERE trashed_at IS NULL AND is_private = 1",
-            )
-            .map_err(|e| format!("failed to prepare private note search: {e}"))?;
-        let private_rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })
-            .map_err(|e| format!("failed to search private notes: {e}"))?;
-        for row in private_rows {
-            let (note_id, title, content) =
-                row.map_err(|e| format!("failed to search private notes: {e}"))?;
-            let plain_title = crypto::decrypt(key, &title)
+    // Encrypted notes never match the SQL LIKE above; when their key is
+    // unlocked, scan them in Rust instead (private notes via master key,
+    // protected-folder notes via that folder's key).
+    let needle = query.trim().to_lowercase();
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, folder_id, title, content, is_private FROM notes
+             WHERE trashed_at IS NULL",
+        )
+        .map_err(|e| format!("failed to prepare encrypted note search: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })
+        .map_err(|e| format!("failed to scan notes for search: {e}"))?;
+    let mut matched: Vec<i64> = Vec::new();
+    for row in rows {
+        let (note_id, folder_id, title, content, is_private) =
+            row.map_err(|e| format!("failed to scan notes for search: {e}"))?;
+        if is_private == 0 && protecting_folder_id(&conn, folder_id)?.is_none() {
+            continue;
+        }
+        if let NoteProtection::Unlocked(key) =
+            note_protection(&conn, crypto.inner(), folder_id, is_private != 0)?
+        {
+            let plain_title = crypto::decrypt(&key, &title)
                 .map_err(|e| format!("failed to decrypt note {note_id} title: {e}"))?;
-            let plain_content = crypto::decrypt(key, &content)
+            let plain_content = crypto::decrypt(&key, &content)
                 .map_err(|e| format!("failed to decrypt note {note_id} content: {e}"))?;
             if plain_title.to_lowercase().contains(&needle)
                 || plain_content.to_lowercase().contains(&needle)
             {
-                results.push(note_summary(&conn, note_id, Some(key))?);
+                matched.push(note_id);
             }
         }
-        results.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then(b.id.cmp(&a.id)));
     }
+    for note_id in matched {
+        results.push(note_summary(&conn, note_id, crypto.inner())?);
+    }
+    results.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then(b.id.cmp(&a.id)));
 
     Ok(results)
 }
@@ -721,8 +936,7 @@ pub fn get_note(
     note_id: i64,
 ) -> Result<NoteDetail, String> {
     let conn = db.conn()?;
-    let key = session_key(&crypto);
-    note_detail(&conn, note_id, key.as_ref())
+    note_detail(&conn, note_id, crypto.inner())
 }
 
 #[tauri::command]
@@ -736,7 +950,6 @@ pub fn get_note_by_title(
         return Ok(None);
     }
     let conn = db.conn()?;
-    let key = session_key(&crypto);
     let pattern = escape_like(trimmed);
     let note_id: Option<i64> = conn
         .query_row(
@@ -750,7 +963,7 @@ pub fn get_note_by_title(
         .optional()
         .map_err(|e| format!("failed to look up note titled '{trimmed}': {e}"))?;
     match note_id {
-        Some(id) => note_detail(&conn, id, key.as_ref()).map(Some),
+        Some(id) => note_detail(&conn, id, crypto.inner()).map(Some),
         None => Ok(None),
     }
 }
@@ -762,22 +975,21 @@ pub fn get_backlinks(
     note_id: i64,
 ) -> Result<Vec<NoteSummary>, String> {
     let conn = db.conn()?;
-    let key = session_key(&crypto);
-    let (raw_title, is_private): (String, i64) = conn
+    let (raw_title, is_private, folder_id): (String, i64, i64) = conn
         .query_row(
-            "SELECT title, is_private FROM notes WHERE id = ?1",
+            "SELECT title, is_private, folder_id FROM notes WHERE id = ?1",
             [note_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => format!("note {note_id} not found"),
             other => format!("failed to load note {note_id}: {other}"),
         })?;
-    let title = if is_private != 0 {
-        match key.as_ref() {
-            Some(key) => crypto::decrypt(key, &raw_title)
+    let title = if is_private != 0 || protecting_folder_id(&conn, folder_id)?.is_some() {
+        match note_protection(&conn, crypto.inner(), folder_id, is_private != 0)? {
+            NoteProtection::Unlocked(key) => crypto::decrypt(&key, &raw_title)
                 .map_err(|e| format!("failed to decrypt note {note_id} title: {e}"))?,
-            None => return Ok(Vec::new()),
+            _ => return Ok(Vec::new()),
         }
     } else {
         raw_title
@@ -794,7 +1006,7 @@ pub fn get_backlinks(
            AND n.id != ?2
            AND n.content LIKE ?1 ESCAPE '\\'",
         &[&pattern as &dyn rusqlite::ToSql, &note_id],
-        key.as_ref(),
+        crypto.inner(),
     )
 }
 
@@ -809,19 +1021,25 @@ pub fn create_note(
     let conn = db.conn()?;
     folder_exists(&conn, folder_id)?;
     let now = now_local();
+    let title = title.unwrap_or_default();
+    let content = content.unwrap_or_default();
+    let (stored_title, stored_content) = match note_protection(&conn, crypto.inner(), folder_id, false)? {
+        NoteProtection::None => (title, content),
+        NoteProtection::Locked => {
+            return Err("unlock the protected folder before creating notes in it".to_string());
+        }
+        NoteProtection::Unlocked(key) => (
+            crypto::encrypt(&key, &title)?,
+            crypto::encrypt(&key, &content)?,
+        ),
+    };
     conn.execute(
         "INSERT INTO notes (folder_id, title, content, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?4)",
-        rusqlite::params![
-            folder_id,
-            title.unwrap_or_default(),
-            content.unwrap_or_default(),
-            now
-        ],
+        rusqlite::params![folder_id, stored_title, stored_content, now],
     )
     .map_err(|e| format!("failed to create note: {e}"))?;
-    let key = session_key(&crypto);
-    note_detail(&conn, conn.last_insert_rowid(), key.as_ref())
+    note_detail(&conn, conn.last_insert_rowid(), crypto.inner())
 }
 
 #[tauri::command]
@@ -833,34 +1051,33 @@ pub fn update_note(
     content: String,
 ) -> Result<NoteDetail, String> {
     let conn = db.conn()?;
-    let is_private: i64 = conn
+    let (is_private, folder_id): (i64, i64) = conn
         .query_row(
-            "SELECT is_private FROM notes WHERE id = ?1",
+            "SELECT is_private, folder_id FROM notes WHERE id = ?1",
             [note_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => format!("note {note_id} not found"),
             other => format!("failed to load note {note_id}: {other}"),
         })?;
-    let key = session_key(&crypto);
-    let (stored_title, stored_content) = if is_private != 0 {
-        let key = key
-            .as_ref()
-            .ok_or_else(|| "unlock private notes to edit this note".to_string())?;
-        (
-            crypto::encrypt(key, &title)?,
-            crypto::encrypt(key, &content)?,
-        )
-    } else {
-        (title, content)
-    };
+    let (stored_title, stored_content) =
+        match note_protection(&conn, crypto.inner(), folder_id, is_private != 0)? {
+            NoteProtection::None => (title, content),
+            NoteProtection::Locked => {
+                return Err("unlock this note's protection to edit it".to_string());
+            }
+            NoteProtection::Unlocked(key) => (
+                crypto::encrypt(&key, &title)?,
+                crypto::encrypt(&key, &content)?,
+            ),
+        };
     conn.execute(
         "UPDATE notes SET title = ?1, content = ?2, updated_at = ?3 WHERE id = ?4",
         rusqlite::params![stored_title, stored_content, now_local(), note_id],
     )
     .map_err(|e| format!("failed to update note {note_id}: {e}"))?;
-    note_detail(&conn, note_id, key.as_ref())
+    note_detail(&conn, note_id, crypto.inner())
 }
 
 #[tauri::command]
@@ -871,33 +1088,42 @@ pub fn set_note_private(
     private: bool,
 ) -> Result<NoteDetail, String> {
     let conn = db.conn()?;
-    let (is_private, raw_title, raw_content): (i64, String, String) = conn
+    let (is_private, folder_id, raw_title, raw_content): (i64, i64, String, String) = conn
         .query_row(
-            "SELECT is_private, title, content FROM notes WHERE id = ?1",
+            "SELECT is_private, folder_id, title, content FROM notes WHERE id = ?1",
             [note_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => format!("note {note_id} not found"),
             other => format!("failed to load note {note_id}: {other}"),
         })?;
-    let key = session_key(&crypto);
     if (is_private != 0) == private {
-        return note_detail(&conn, note_id, key.as_ref());
+        return note_detail(&conn, note_id, crypto.inner());
     }
-    let key_ref = key
-        .as_ref()
-        .ok_or_else(|| "unlock private notes first".to_string())?;
-    let (title, content) = if private {
-        (
-            crypto::encrypt(key_ref, &raw_title)?,
-            crypto::encrypt(key_ref, &raw_content)?,
-        )
-    } else {
-        (
-            crypto::decrypt(key_ref, &raw_title)?,
-            crypto::decrypt(key_ref, &raw_content)?,
-        )
+
+    // Decrypt with the note's current context, then re-encrypt with the new one.
+    let current = note_protection(&conn, crypto.inner(), folder_id, is_private != 0)?;
+    let (plain_title, plain_content) = match current {
+        NoteProtection::None => (raw_title, raw_content),
+        NoteProtection::Locked => {
+            return Err("unlock this note's protection first".to_string());
+        }
+        NoteProtection::Unlocked(key) => (
+            crypto::decrypt(&key, &raw_title)?,
+            crypto::decrypt(&key, &raw_content)?,
+        ),
+    };
+    let next = note_protection(&conn, crypto.inner(), folder_id, private)?;
+    let (title, content) = match next {
+        NoteProtection::None => (plain_title, plain_content),
+        NoteProtection::Locked => {
+            return Err("unlock private notes first".to_string());
+        }
+        NoteProtection::Unlocked(key) => (
+            crypto::encrypt(&key, &plain_title)?,
+            crypto::encrypt(&key, &plain_content)?,
+        ),
     };
     conn.execute(
         "UPDATE notes SET title = ?1, content = ?2, is_private = ?3, updated_at = ?4
@@ -905,7 +1131,7 @@ pub fn set_note_private(
         rusqlite::params![title, content, private as i64, now_local(), note_id],
     )
     .map_err(|e| format!("failed to update privacy for note {note_id}: {e}"))?;
-    note_detail(&conn, note_id, Some(key_ref))
+    note_detail(&conn, note_id, crypto.inner())
 }
 
 #[tauri::command]
@@ -916,15 +1142,64 @@ pub fn move_note(
     folder_id: i64,
 ) -> Result<NoteSummary, String> {
     let conn = db.conn()?;
-    note_exists(&conn, note_id)?;
     folder_exists(&conn, folder_id)?;
+    let (old_folder_id, is_private): (i64, i64) = conn
+        .query_row(
+            "SELECT folder_id, is_private FROM notes WHERE id = ?1",
+            [note_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => format!("note {note_id} not found"),
+            other => format!("failed to load note {note_id}: {other}"),
+        })?;
+
+    // Re-encrypt when the move crosses a protection boundary.
+    let old_ctx = protecting_folder_id(&conn, old_folder_id)?;
+    let new_ctx = protecting_folder_id(&conn, folder_id)?;
+    if old_ctx != new_ctx && is_private == 0 {
+        let (raw_title, raw_content): (String, String) = conn
+            .query_row(
+                "SELECT title, content FROM notes WHERE id = ?1",
+                [note_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|e| format!("failed to load note {note_id}: {e}"))?;
+        let (plain_title, plain_content) =
+            match note_protection(&conn, crypto.inner(), old_folder_id, false)? {
+                NoteProtection::None => (raw_title, raw_content),
+                NoteProtection::Locked => {
+                    return Err("unlock the note's current folder before moving it".to_string());
+                }
+                NoteProtection::Unlocked(key) => (
+                    crypto::decrypt(&key, &raw_title)?,
+                    crypto::decrypt(&key, &raw_content)?,
+                ),
+            };
+        let (stored_title, stored_content) =
+            match note_protection(&conn, crypto.inner(), folder_id, false)? {
+                NoteProtection::None => (plain_title, plain_content),
+                NoteProtection::Locked => {
+                    return Err("unlock the destination folder before moving notes into it".to_string());
+                }
+                NoteProtection::Unlocked(key) => (
+                    crypto::encrypt(&key, &plain_title)?,
+                    crypto::encrypt(&key, &plain_content)?,
+                ),
+            };
+        conn.execute(
+            "UPDATE notes SET title = ?1, content = ?2 WHERE id = ?3",
+            rusqlite::params![stored_title, stored_content, note_id],
+        )
+        .map_err(|e| format!("failed to re-encrypt note {note_id} for the move: {e}"))?;
+    }
+
     conn.execute(
         "UPDATE notes SET folder_id = ?1, updated_at = ?2 WHERE id = ?3",
         rusqlite::params![folder_id, now_local(), note_id],
     )
     .map_err(|e| format!("failed to move note {note_id}: {e}"))?;
-    let key = session_key(&crypto);
-    note_summary(&conn, note_id, key.as_ref())
+    note_summary(&conn, note_id, crypto.inner())
 }
 
 #[tauri::command]
@@ -941,8 +1216,7 @@ pub fn set_favorite(
         rusqlite::params![favorite as i64, note_id],
     )
     .map_err(|e| format!("failed to update favorite for note {note_id}: {e}"))?;
-    let key = session_key(&crypto);
-    note_summary(&conn, note_id, key.as_ref())
+    note_summary(&conn, note_id, crypto.inner())
 }
 
 #[tauri::command]
@@ -958,8 +1232,7 @@ pub fn trash_note(
         rusqlite::params![now_local(), note_id],
     )
     .map_err(|e| format!("failed to trash note {note_id}: {e}"))?;
-    let key = session_key(&crypto);
-    note_summary(&conn, note_id, key.as_ref())
+    note_summary(&conn, note_id, crypto.inner())
 }
 
 #[tauri::command]
@@ -975,8 +1248,7 @@ pub fn restore_note(
         [note_id],
     )
     .map_err(|e| format!("failed to restore note {note_id}: {e}"))?;
-    let key = session_key(&crypto);
-    note_summary(&conn, note_id, key.as_ref())
+    note_summary(&conn, note_id, crypto.inner())
 }
 
 #[tauri::command]

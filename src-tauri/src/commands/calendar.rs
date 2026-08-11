@@ -234,12 +234,11 @@ pub fn get_calendar_day(
 ) -> Result<CalendarDayDetail, String> {
     validate_date(&date)?;
     let conn = db.conn()?;
-    let key = crypto.inner().key();
 
     let (points, xp) = read_day_totals(&conn, &date)?;
     let habits = read_day_habits(&conn, &date)?;
     let journal = read_day_journal(&conn, &date)?;
-    let notes = read_day_notes(&conn, &date, key.as_ref())?;
+    let notes = read_day_notes(&conn, &date, crypto.inner())?;
     let tasks = read_day_tasks(&conn, &date)?;
 
     Ok(CalendarDayDetail {
@@ -335,11 +334,11 @@ fn read_day_journal(conn: &Connection, date: &str) -> Result<Option<CalendarJour
 fn read_day_notes(
     conn: &Connection,
     date: &str,
-    key: Option<&[u8; crypto::KEY_LEN]>,
+    crypto: &CryptoState,
 ) -> Result<Vec<CalendarNote>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, title, is_private FROM notes
+            "SELECT id, folder_id, title, is_private FROM notes
              WHERE trashed_at IS NULL AND substr(created_at, 1, 10) = ?1
              ORDER BY id ASC",
         )
@@ -348,20 +347,23 @@ fn read_day_notes(
         .query_map([date], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)? != 0,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)? != 0,
             ))
         })
         .map_err(|e| format!("failed to load calendar notes: {e}"))?;
     let mut notes = Vec::new();
     for row in rows {
-        let (id, raw_title, is_private) =
+        let (id, folder_id, raw_title, is_private) =
             row.map_err(|e| format!("failed to load calendar notes: {e}"))?;
-        let title = if is_private {
-            match key {
-                Some(key) => crypto::decrypt(key, &raw_title)
+        let protected = is_private
+            || super::notes::protecting_folder_id(conn, folder_id)?.is_some();
+        let title = if protected {
+            match super::notes::note_protection(conn, crypto, folder_id, is_private)? {
+                super::notes::NoteProtection::Unlocked(key) => crypto::decrypt(&key, &raw_title)
                     .map_err(|e| format!("failed to decrypt note {id} title: {e}"))?,
-                None => LOCKED_NOTE_TITLE.to_string(),
+                _ => LOCKED_NOTE_TITLE.to_string(),
             }
         } else {
             raw_title
@@ -369,7 +371,7 @@ fn read_day_notes(
         notes.push(CalendarNote {
             id,
             title,
-            is_private,
+            is_private: protected,
         });
     }
     Ok(notes)

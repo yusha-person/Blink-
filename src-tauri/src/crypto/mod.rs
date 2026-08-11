@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use aes_gcm::aead::{Aead, KeyInit};
@@ -13,23 +14,85 @@ pub const KEY_LEN: usize = 32;
 pub const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
 
-/// Session-only encryption key. Key material never leaves Rust.
-pub struct CryptoState(pub Mutex<Option<[u8; KEY_LEN]>>);
+/// Session-only encryption keys. Key material never leaves Rust.
+/// Holds the master key plus one data key per unlocked protected folder.
+pub struct CryptoState {
+    master: Mutex<Option<[u8; KEY_LEN]>>,
+    folder_keys: Mutex<HashMap<i64, [u8; KEY_LEN]>>,
+}
 
 impl CryptoState {
     pub fn new() -> Self {
-        Self(Mutex::new(None))
+        Self {
+            master: Mutex::new(None),
+            folder_keys: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn key(&self) -> Option<[u8; KEY_LEN]> {
-        self.0.lock().ok().and_then(|guard| *guard)
+        self.master.lock().ok().and_then(|guard| *guard)
     }
 
     pub fn set_key(&self, key: Option<[u8; KEY_LEN]>) {
-        if let Ok(mut guard) = self.0.lock() {
+        if let Ok(mut guard) = self.master.lock() {
             *guard = key;
         }
+        if key.is_none() {
+            self.clear_folder_keys();
+        }
     }
+
+    pub fn folder_key(&self, folder_id: i64) -> Option<[u8; KEY_LEN]> {
+        self.folder_keys
+            .lock()
+            .ok()
+            .and_then(|guard| guard.get(&folder_id).copied())
+    }
+
+    pub fn set_folder_key(&self, folder_id: i64, key: [u8; KEY_LEN]) {
+        if let Ok(mut guard) = self.folder_keys.lock() {
+            guard.insert(folder_id, key);
+        }
+    }
+
+    pub fn remove_folder_key(&self, folder_id: i64) {
+        if let Ok(mut guard) = self.folder_keys.lock() {
+            guard.remove(&folder_id);
+        }
+    }
+
+    pub fn clear_folder_keys(&self) {
+        if let Ok(mut guard) = self.folder_keys.lock() {
+            guard.clear();
+        }
+    }
+}
+
+/// Generates a fresh random 256-bit data key (used per protected folder).
+pub fn generate_key() -> [u8; KEY_LEN] {
+    let mut key = [0u8; KEY_LEN];
+    OsRng.fill_bytes(&mut key);
+    key
+}
+
+/// Encrypts (wraps) a data key with a key-encryption key.
+pub fn wrap_key(kek: &[u8; KEY_LEN], data_key: &[u8; KEY_LEN]) -> Result<String, String> {
+    let encoded = B64.encode(data_key);
+    encrypt(kek, &encoded)
+}
+
+/// Decrypts (unwraps) a wrapped data key.
+pub fn unwrap_key(kek: &[u8; KEY_LEN], blob: &str) -> Result<[u8; KEY_LEN], String> {
+    let encoded = decrypt(kek, blob)?;
+    let bytes = B64
+        .decode(encoded)
+        .map_err(|_| "wrapped key is corrupt".to_string())?;
+    if bytes.len() != KEY_LEN {
+        return Err("wrapped key has an invalid length".to_string());
+    }
+    let mut key = [0u8; KEY_LEN];
+    key.copy_from_slice(&bytes);
+    Ok(key)
 }
 
 pub fn hash_password(password: &str) -> Result<String, String> {

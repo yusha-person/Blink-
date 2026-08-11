@@ -36,12 +36,16 @@ export default function PrivacySettings() {
   const unlock = usePrivacyStore((s) => s.unlock);
   const lock = usePrivacyStore((s) => s.lock);
   const changePassword = usePrivacyStore((s) => s.changePassword);
+  const resetPassword = usePrivacyStore((s) => s.resetPassword);
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [nextConfirm, setNextConfirm] = useState("");
+  const [resetStep, setResetStep] = useState<"idle" | "warn" | "form">("idle");
+  const [resetPw, setResetPw] = useState("");
+  const [resetConfirm, setResetConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -90,6 +94,24 @@ export default function PrivacySettings() {
       setNext("");
       setNextConfirm("");
       setNotice("Password changed. All private notes were re-encrypted.");
+    }
+  };
+
+  const handleReset = async () => {
+    if (resetPw !== resetConfirm) {
+      setLocalError("New passwords do not match.");
+      return;
+    }
+    const ok = await run(() => resetPassword(resetPw));
+    if (ok) {
+      setResetPw("");
+      setResetConfirm("");
+      setResetStep("idle");
+      setNotice(
+        status?.unlocked
+          ? "Master password reset. All protected content was re-encrypted."
+          : "Master password reset. Notes locked with the old password remain encrypted; folder passwords are unchanged.",
+      );
     }
   };
 
@@ -143,17 +165,92 @@ export default function PrivacySettings() {
               {status.privateCount}{" "}
               {status.privateCount === 1 ? "private note" : "private notes"}
             </span>
-            {status.unlocked && (
+          {status.unlocked && (
+            <button
+              type="button"
+              onClick={() => void lock()}
+              disabled={busy}
+              className={buttonClass}
+            >
+              Lock now
+            </button>
+          )}
+
+          {resetStep === "idle" ? (
+            <button
+              type="button"
+              onClick={() => {
+                setLocalError(null);
+                setNotice(null);
+                setResetStep("warn");
+              }}
+              disabled={busy}
+              className="w-fit rounded-lg border border-warning/40 bg-warning/10 px-3 py-1.5 text-xs font-medium text-warning transition-colors hover:bg-warning/20 disabled:opacity-60"
+            >
+              Reset Password (Testing)
+            </button>
+          ) : resetStep === "warn" ? (
+            <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3">
+              <p className="text-xs leading-relaxed text-warning">
+                Password recovery is currently a testing feature. A proper recovery
+                system will be added later. This sets a new master password without
+                asking for the old one.
+                {!status.unlocked &&
+                  " Content currently locked with the old password cannot be recovered by this reset."}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setResetStep("form")}
+                  className={buttonClass}
+                >
+                  I understand, continue
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setResetStep("idle")}
+                  className="glass-sm glass-hover px-3 py-1.5 text-xs text-muted"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="password"
+                value={resetPw}
+                onChange={(e) => setResetPw(e.target.value)}
+                placeholder="New master password (min 4 chars)"
+                autoComplete="new-password"
+                className={inputClass}
+              />
+              <input
+                type="password"
+                value={resetConfirm}
+                onChange={(e) => setResetConfirm(e.target.value)}
+                placeholder="Repeat new password"
+                autoComplete="new-password"
+                className={inputClass}
+              />
               <button
                 type="button"
-                onClick={() => void lock()}
-                disabled={busy}
+                onClick={() => void handleReset()}
+                disabled={busy || !resetPw || !resetConfirm}
                 className={buttonClass}
               >
-                Lock now
+                Reset password
               </button>
-            )}
-          </div>
+              <button
+                type="button"
+                onClick={() => setResetStep("idle")}
+                className="glass-sm glass-hover px-3 py-1.5 text-xs text-muted"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
 
           {!status.unlocked ? (
             <div className="flex flex-wrap items-center gap-2">

@@ -261,3 +261,19 @@
   font-display: swap;
   src: url("../../node_modules/@fontsource/atkinson-hyperlegible/files/atkinson-hyperlegible-latin-700-normal.woff2") format("woff2");
 }
+
+@font-face {
+  font-family: "Fredoka Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../../node_modules/@fontsource-variable/fredoka/files/fredoka-latin-wght-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Caveat Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../../node_modules/@fontsource-variable/caveat/files/caveat-latin-wght-normal.woff2") format("woff2");
+}

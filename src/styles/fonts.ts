@@ -22,6 +22,8 @@ export const FONTS: FontDefinition[] = [
   { id: "ibm-plex-sans", name: "IBM Plex Sans", family: "IBM Plex Sans Variable", mono: false },
   { id: "space-grotesk", name: "Space Grotesk", family: "Space Grotesk Variable", mono: false },
   { id: "atkinson-hyperlegible", name: "Atkinson Hyperlegible", family: "Atkinson Hyperlegible", mono: false },
+  { id: "fredoka", name: "Fredoka (Cartoony)", family: "Fredoka Variable", mono: false },
+  { id: "caveat", name: "Caveat (Handwritten)", family: "Caveat Variable", mono: false },
   { id: "fira-code", name: "Fira Code", family: "Fira Code Variable", mono: true },
   { id: "jetbrains-mono", name: "JetBrains Mono", family: "JetBrains Mono Variable", mono: true },
   { id: "source-code-pro", name: "Source Code Pro", family: "Source Code Pro Variable", mono: true },

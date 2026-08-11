@@ -4,6 +4,8 @@ export interface FolderEntry {
   parentId: number;
   sortOrder: number;
   isSystem: boolean;
+  isProtected: boolean;
+  locked: boolean;
   noteCount: number;
 }
 

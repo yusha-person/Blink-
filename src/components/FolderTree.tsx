@@ -1,12 +1,16 @@
 import { useMemo, useState, type DragEvent } from "react";
 import type { FolderEntry } from "../types/notes";
 import { useNoteStore } from "../stores/noteStore";
+import { usePrivacyStore } from "../stores/privacyStore";
 import {
   ChevronRightIcon,
   EditIcon,
   FolderIcon,
+  LockIcon,
   PlusIcon,
   TrashIcon,
+  UnlockIcon,
+  XIcon,
 } from "./icons";
 
 export const NOTE_DRAG_TYPE = "application/x-lifexp-note";
@@ -73,6 +77,8 @@ function FolderRow({
   const moveFolder = useNoteStore((s) => s.moveFolder);
   const moveNote = useNoteStore((s) => s.moveNote);
   const folders = useNoteStore((s) => s.folders);
+  const openFolderSecurity = usePrivacyStore((s) => s.openFolderSecurity);
+  const lockFolder = usePrivacyStore((s) => s.lockFolder);
   const [dropHint, setDropHint] = useState<"before" | "after" | "into" | null>(null);
 
   const { folder, depth, children } = node;
@@ -184,30 +190,115 @@ function FolderRow({
         </button>
         <button
           type="button"
-          onClick={() => onSelect(folder.id)}
+          onClick={() => {
+            if (folder.isProtected && folder.locked) {
+              openFolderSecurity("unlock", folder);
+            } else {
+              onSelect(folder.id);
+            }
+          }}
           className="flex min-w-0 flex-1 items-center gap-1.5"
         >
           <FolderIcon width={15} height={15} className="shrink-0" />
           <span className="truncate">{folder.name}</span>
-          {folder.noteCount > 0 && (
+          {folder.isProtected && (
+            <span className="shrink-0 text-warning" title={folder.locked ? "Locked" : "Unlocked"}>
+              {folder.locked ? (
+                <LockIcon width={11} height={11} />
+              ) : (
+                <UnlockIcon width={11} height={11} />
+              )}
+            </span>
+          )}
+          {folder.noteCount > 0 && !folder.locked && (
             <span className="ml-auto shrink-0 rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">
               {folder.noteCount}
             </span>
           )}
         </button>
         <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
-          {depth < MAX_DEPTH && (
+          {folder.isProtected ? (
+            <>
+              {folder.locked ? (
+                <button
+                  type="button"
+                  title={`Unlock ${folder.name}`}
+                  aria-label={`Unlock ${folder.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openFolderSecurity("unlock", folder);
+                  }}
+                  className="rounded p-0.5 text-warning hover:text-accent"
+                >
+                  <LockIcon width={12} height={12} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  title={`Lock ${folder.name}`}
+                  aria-label={`Lock ${folder.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void lockFolder(folder.id);
+                  }}
+                  className="rounded p-0.5 text-warning hover:text-accent"
+                >
+                  <UnlockIcon width={12} height={12} />
+                </button>
+              )}
+              <button
+                type="button"
+                title={`Change password for ${folder.name}`}
+                aria-label={`Change password for ${folder.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openFolderSecurity("change", folder);
+                }}
+                className="rounded p-0.5 text-muted hover:text-accent"
+              >
+                <EditIcon width={12} height={12} />
+              </button>
+              <button
+                type="button"
+                title={`Remove password from ${folder.name}`}
+                aria-label={`Remove password from ${folder.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openFolderSecurity("remove", folder);
+                }}
+                className="rounded p-0.5 text-muted hover:text-danger"
+              >
+                <XIcon width={12} height={12} />
+              </button>
+            </>
+          ) : (
+            depth < MAX_DEPTH && (
+              <button
+                type="button"
+                title={`New subfolder in ${folder.name}`}
+                aria-label={`New subfolder in ${folder.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openFolderDialog(folder.id);
+                }}
+                className="rounded p-0.5 text-muted hover:text-accent"
+              >
+                <PlusIcon width={12} height={12} />
+              </button>
+            )
+          )}
+          {!folder.isProtected && (
             <button
               type="button"
-              title={`New subfolder in ${folder.name}`}
-              aria-label={`New subfolder in ${folder.name}`}
+              title={`Protect ${folder.name} with a password`}
+              aria-label={`Protect ${folder.name} with a password`}
               onClick={(e) => {
                 e.stopPropagation();
-                openFolderDialog(folder.id);
+                openFolderSecurity("add", folder);
               }}
-              className="rounded p-0.5 text-muted hover:text-accent"
+              className="rounded p-0.5 text-muted hover:text-warning"
             >
-              <PlusIcon width={12} height={12} />
+              <LockIcon width={12} height={12} />
             </button>
           )}
           {!folder.isSystem && (

@@ -76,27 +76,39 @@ function luminance(hex: string): number {
 
 function buildTokens(seed: ThemeSeed, mode: "dark" | "light"): ThemeTokens {
   const stepTarget = mode === "dark" ? "#ffffff" : "#000000";
+  // Dark themes get a small uniform brightness lift so they feel vibrant
+  // rather than dull, while keeping their color identity.
+  const lift = (hex: string, amount: number) => mix(hex, "#ffffff", amount);
+  const background = mode === "dark" ? lift(seed.background, 0.05) : seed.background;
+  const surface = mode === "dark" ? lift(seed.surface, 0.05) : seed.surface;
+  const border = mode === "dark" ? lift(seed.border, 0.06) : seed.border;
+  const textMuted =
+    mode === "dark" ? lift(seed.textMuted, 0.04) : seed.textMuted;
   return {
-    background: seed.background,
-    surface: seed.surface,
-    surfaceHover: seed.surfaceHover ?? mix(seed.surface, stepTarget, 0.06),
-    surfaceActive: seed.surfaceActive ?? mix(seed.surface, stepTarget, 0.12),
+    background,
+    surface,
+    surfaceHover: seed.surfaceHover ?? mix(surface, stepTarget, 0.06),
+    surfaceActive: seed.surfaceActive ?? mix(surface, stepTarget, 0.12),
     text: seed.text,
-    textMuted: seed.textMuted,
-    border: seed.border,
-    borderHover: seed.borderHover ?? mix(seed.border, stepTarget, 0.15),
+    textMuted,
+    border,
+    borderHover: seed.borderHover ?? mix(border, stepTarget, 0.15),
     accent: seed.accent,
     accentHover: seed.accentHover,
     accentText: seed.accentText,
     success: seed.success ?? SUCCESS,
     warning: seed.warning ?? WARNING,
     danger: seed.danger ?? DANGER,
-    overlay: seed.overlay ?? withAlpha(seed.background, 0.7),
+    overlay: seed.overlay ?? withAlpha(background, 0.7),
     focusRing: seed.focusRing ?? seed.accent,
     selection: seed.selection ?? withAlpha(seed.accent, 0.35),
-    codeBackground: seed.codeBackground ?? mix(seed.surface, stepTarget, 0.06),
-    scrollbarThumb: seed.scrollbarThumb ?? seed.border,
-    scrollbarTrack: seed.scrollbarTrack ?? seed.surface,
+    codeBackground: seed.codeBackground
+      ? mode === "dark"
+        ? lift(seed.codeBackground, 0.05)
+        : seed.codeBackground
+      : mix(surface, stepTarget, 0.06),
+    scrollbarThumb: seed.scrollbarThumb ?? border,
+    scrollbarTrack: seed.scrollbarTrack ?? surface,
     shadow: seed.shadow ?? (mode === "dark" ? "rgba(0, 0, 0, 0.45)" : "rgba(15, 23, 42, 0.10)"),
     shadowSm: seed.shadowSm ?? (mode === "dark" ? "rgba(0, 0, 0, 0.35)" : "rgba(15, 23, 42, 0.08)"),
   };
@@ -173,7 +185,7 @@ const nord = defineTheme(
     background: "#2e3440",
     surface: "#3b4252",
     text: "#eceff4",
-    textMuted: "#a8b2be",
+    textMuted: "#b0bac6",
     border: "#4c566a",
     accent: "#88c0d0",
     accentHover: "#81a1c1",

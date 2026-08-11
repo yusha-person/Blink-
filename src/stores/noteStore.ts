@@ -71,7 +71,7 @@ type NoteState = {
   deleteFolderRequest: DeleteFolderRequest | null;
   requestDeleteFolder: (request: DeleteFolderRequest) => void;
   cancelDeleteFolder: () => void;
-  createFolder: (name: string, parentId: number | null) => Promise<boolean>;
+  createFolder: (name: string, parentId: number | null) => Promise<FolderEntry | null>;
   renameFolder: (folderId: number, name: string) => Promise<boolean>;
   moveFolder: (folderId: number, newParentId: number, newIndex?: number) => Promise<void>;
   deleteFolder: (
@@ -390,13 +390,13 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
   createFolder: async (name, parentId) => {
     try {
-      await invoke("create_folder", { name, parentId });
+      const folder = await invoke<FolderEntry>("create_folder", { name, parentId });
       set({ error: null, folderDialog: null });
       await get().refreshMeta();
-      return true;
+      return folder;
     } catch (e) {
       set({ error: String(e) });
-      return false;
+      return null;
     }
   },
 

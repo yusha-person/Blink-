@@ -265,6 +265,17 @@ pub const MIGRATIONS: &[Migration] = &[
         );
     "#,
     },
+    Migration {
+        version: 10,
+        name: "folder password protection",
+        sql: r#"
+        ALTER TABLE folders ADD COLUMN is_protected INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE folders ADD COLUMN password_hash TEXT;
+        ALTER TABLE folders ADD COLUMN kdf_salt TEXT;
+        ALTER TABLE folders ADD COLUMN wrapped_key_master TEXT;
+        ALTER TABLE folders ADD COLUMN wrapped_key_folder TEXT;
+    "#,
+    },
 ];
 
 pub fn current_version(conn: &Connection) -> Result<u32, String> {
