@@ -35,7 +35,7 @@ export default function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection title="About">
-        <SettingsRow label="Blink" description="Fully offline habit tracking, notes, and journaling.">
+        <SettingsRow label="Blink" description="Offline habit tracking, notes, and journaling. Optional feature/bug reports are the only feature that uses the internet.">
           <span className="text-xs text-slate-500">v0.1.0</span>
         </SettingsRow>
       </SettingsSection>

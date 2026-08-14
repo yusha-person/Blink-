@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blink Admin</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0f1218; color: #e2e8f0; min-height: 100vh; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+    .card { background: #171c26; border: 1px solid #2a3242; border-radius: 12px; padding: 20px; }
+    input, textarea, select { width: 100%; background: #0f1218; border: 1px solid #2a3242; border-radius: 8px; color: #e2e8f0; padding: 8px 10px; font-size: 14px; }
+    input:focus, textarea:focus, select:focus { outline: 2px solid #3b82f6; }
+    button { background: #1d2b45; border: 1px solid #3b82f6; color: #60a5fa; border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; }
+    button:hover { background: #24365a; }
+    button.danger { border-color: #ef4444; color: #f87171; background: #2a1518; }
+    h1 { font-size: 20px; margin-bottom: 16px; }
+    h2 { font-size: 15px; margin-bottom: 12px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .error { color: #f87171; font-size: 13px; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #232a38; }
+    th { color: #8b96a8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover td { background: #1a2130; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; border: 1px solid #3a4356; color: #94a3b8; }
+    .badge.new { border-color: #3b82f6; color: #60a5fa; }
+    .badge.in-progress { border-color: #f59e0b; color: #fbbf24; }
+    .badge.resolved { border-color: #22c55e; color: #4ade80; }
+    .badge.wont-fix { border-color: #3a4356; color: #64748b; }
+    .badge.bug { border-color: #ef4444; color: #f87171; }
+    .badge.feature { border-color: #a855f7; color: #c084fc; }
+    .muted { color: #8b96a8; font-size: 13px; }
+    .field { margin-bottom: 12px; }
+    .field label { display: block; font-size: 12px; color: #8b96a8; margin-bottom: 4px; }
+    .grow { flex: 1; min-width: 160px; }
+    .mt { margin-top: 16px; }
+    .right { margin-left: auto; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #0f1218; border: 1px solid #2a3242; border-radius: 8px; padding: 12px; font-size: 13px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="login-view" class="card" style="max-width: 360px; margin: 12vh auto 0;">
+      <h1>Blink Admin</h1>
+      <form id="login-form">
+        <div class="field"><label>Username</label><input id="login-user" autocomplete="username" required /></div>
+        <div class="field"><label>Password</label><input id="login-pass" type="password" autocomplete="current-password" required /></div>
+        <button type="submit" style="width: 100%">Sign in</button>
+        <p id="login-error" class="error hidden">Invalid credentials.</p>
+      </form>
+    </div>
+
+    <div id="dashboard-view" class="hidden">
+      <div class="row" style="margin-bottom: 16px;">
+        <h1 style="margin: 0;">Reports</h1>
+        <span id="total" class="muted"></span>
+        <button id="logout-btn" class="right">Log out</button>
+      </div>
+      <div class="card">
+        <div class="row" style="margin-bottom: 12px;">
+          <select id="filter-type" class="grow">
+            <option value="">All types</option>
+            <option value="bug">Bug</option>
+            <option value="feature">Feature</option>
+          </select>
+          <select id="filter-status" class="grow">
+            <option value="">All statuses</option>
+            <option value="new">New</option>
+            <option value="in-progress">In progress</option>
+            <option value="resolved">Resolved</option>
+            <option value="wont-fix">Won't fix</option>
+          </select>
+          <input id="filter-q" class="grow" placeholder="Search title/description…" />
+        </div>
+        <table>
+          <thead><tr><th>Type</th><th>Title</th><th>Status</th><th>Date</th></tr></thead>
+          <tbody id="report-rows"></tbody>
+        </table>
+        <div class="row mt">
+          <button id="prev-page">← Prev</button>
+          <span id="page-label" class="muted"></span>
+          <button id="next-page">Next →</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="detail-view" class="hidden">
+      <div class="row" style="margin-bottom: 16px;">
+        <button id="back-btn">← Back</button>
+        <h1 style="margin: 0;" id="detail-title"></h1>
+      </div>
+      <div class="card">
+        <div class="row" style="margin-bottom: 12px;">
+          <span id="detail-type" class="badge"></span>
+          <span id="detail-id" class="muted"></span>
+          <span id="detail-date" class="muted"></span>
+        </div>
+        <h2>Description</h2>
+        <pre id="detail-description"></pre>
+        <div id="detail-meta" class="mt muted"></div>
+        <div class="field mt">
+          <label>Status</label>
+          <select id="detail-status">
+            <option value="new">New</option>
+            <option value="in-progress">In progress</option>
+            <option value="resolved">Resolved</option>
+            <option value="wont-fix">Won't fix</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Internal notes (admin only, never shown to the submitter)</label>
+          <textarea id="detail-notes" rows="3"></textarea>
+        </div>
+        <div class="row">
+          <button id="save-btn">Save</button>
+          <span id="save-msg" class="muted hidden">Saved.</span>
+          <button id="delete-btn" class="danger right">Delete report</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    let page = 1;
+    let currentId = null;
+
+    async function api(path, options = {}) {
+      const res = await fetch(path, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      if (res.status === 401 && !path.includes("login")) showLogin();
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `request failed (${res.status})`);
+      return body;
+    }
+
+    function showLogin() {
+      $("login-view").classList.remove("hidden");
+      $("dashboard-view").classList.add("hidden");
+      $("detail-view").classList.add("hidden");
+    }
+
+    function showDashboard() {
+      $("login-view").classList.add("hidden");
+      $("detail-view").classList.add("hidden");
+      $("dashboard-view").classList.remove("hidden");
+      loadReports();
+    }
+
+    async function loadReports() {
+      const params = new URLSearchParams();
+      if ($("filter-type").value) params.set("type", $("filter-type").value);
+      if ($("filter-status").value) params.set("status", $("filter-status").value);
+      if ($("filter-q").value.trim()) params.set("q", $("filter-q").value.trim());
+      params.set("page", String(page));
+      const data = await api(`/api/admin/reports?${params}`);
+      $("total").textContent = `${data.total} total`;
+      $("page-label").textContent = `Page ${data.page} of ${Math.max(1, Math.ceil(data.total / data.perPage))}`;
+      $("report-rows").innerHTML = data.reports.map((r) => `
+        <tr class="clickable" data-id="${esc(r.id)}">
+          <td><span class="badge ${esc(r.type)}">${esc(r.type)}</span></td>
+          <td>${esc(r.title)}</td>
+          <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span></td>
+          <td class="muted">${esc(new Date(r.created_at).toLocaleString())}</td>
+        </tr>`).join("") || `<tr><td colspan="4" class="muted">No reports.</td></tr>`;
+      document.querySelectorAll("tr.clickable").forEach((tr) =>
+        tr.addEventListener("click", () => openDetail(tr.dataset.id)));
+    }
+
+    async function openDetail(id) {
+      currentId = id;
+      const r = await api(`/api/admin/reports/${id}`);
+      $("detail-title").textContent = r.title;
+      $("detail-type").textContent = r.type;
+      $("detail-type").className = `badge ${r.type}`;
+      $("detail-id").textContent = r.id;
+      $("detail-date").textContent = new Date(r.created_at).toLocaleString();
+      $("detail-description").textContent = r.description;
+      const meta = [];
+      if (r.contact_email) meta.push(`Contact: ${r.contact_email}`);
+      if (r.app_version) meta.push(`App version: ${r.app_version}`);
+      if (r.os) meta.push(`OS: ${r.os}`);
+      $("detail-meta").textContent = meta.join(" · ") || "No contact or device info provided.";
+      $("detail-status").value = r.status;
+      $("detail-notes").value = r.admin_notes ?? "";
+      $("save-msg").classList.add("hidden");
+      $("dashboard-view").classList.add("hidden");
+      $("detail-view").classList.remove("hidden");
+    }
+
+    $("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("login-error").classList.add("hidden");
+      try {
+        await api("/api/admin/login", {
+          method: "POST",
+          body: JSON.stringify({ username: $("login-user").value, password: $("login-pass").value }),
+        });
+        showDashboard();
+      } catch {
+        $("login-error").classList.remove("hidden");
+      }
+    });
+
+    $("logout-btn").addEventListener("click", async () => {
+      await api("/api/admin/logout", { method: "POST" });
+      showLogin();
+    });
+
+    for (const id of ["filter-type", "filter-status"]) {
+      $(id).addEventListener("change", () => { page = 1; loadReports(); });
+    }
+    let searchTimer;
+    $("filter-q").addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { page = 1; loadReports(); }, 300);
+    });
+    $("prev-page").addEventListener("click", () => { if (page > 1) { page--; loadReports(); } });
+    $("next-page").addEventListener("click", () => { page++; loadReports(); });
+    $("back-btn").addEventListener("click", showDashboard);
+
+    $("save-btn").addEventListener("click", async () => {
+      await api(`/api/admin/reports/${currentId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: $("detail-status").value, adminNotes: $("detail-notes").value }),
+      });
+      $("save-msg").classList.remove("hidden");
+    });
+
+    $("delete-btn").addEventListener("click", async () => {
+      if (!confirm("Delete this report permanently?")) return;
+      await api(`/api/admin/reports/${currentId}`, { method: "DELETE" });
+      showDashboard();
+    });
+
+    // Try to resume an existing session.
+    (async () => {
+      try {
+        await api("/api/admin/reports?page=1");
+        showDashboard();
+      } catch {
+        showLogin();
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -11,6 +11,7 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_http::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let database = db::Database::connect(data_dir.join(db::DB_FILE_NAME))?;
@@ -91,9 +92,9 @@ pub fn run() {
             commands::custom_achievements::create_custom_achievement,
             commands::custom_achievements::update_custom_achievement,
             commands::custom_achievements::delete_custom_achievement,
-            commands::feedback::list_feedback_reports,
-            commands::feedback::save_feedback_report,
-            commands::feedback::update_feedback_status
+            commands::feedback::submit_feedback_report,
+            commands::feedback::list_queued_reports,
+            commands::feedback::retry_pending_reports
         ])
         .run(tauri::generate_context!())
         .expect("error while running Blink");

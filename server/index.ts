@@ -1,169 +1,241 @@
-import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import crypto from "node:crypto";
+import express, { type NextFunction, type Request, type Response } from "express";
+import { argon2Verify } from "hash-wasm";
+import { join } from "node:path";
+import { SESSION_COOKIE, signSession, verifySession } from "./auth";
+import { db, generateId } from "./db";
 
 const PORT = Number(process.env.BLINK_API_PORT ?? 4789);
-const DB_PATH = process.env.BLINK_DB_PATH ?? join(import.meta.dir, "feedback.db");
-const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
-const RATE_LIMIT_MAX = 5;
+const ADMIN_USER = process.env.BLINK_ADMIN_USER;
+const ADMIN_HASH = process.env.BLINK_ADMIN_HASH;
+const REQUIRE_HTTPS = process.env.BLINK_REQUIRE_HTTPS === "1";
 
-const VALID_STATUSES = [
-  "Submitted",
-  "Reviewing",
-  "Planned",
-  "In Progress",
-  "Completed",
-  "Closed",
-] as const;
+const LIMITS = { title: 200, description: 5000, contactEmail: 200, appVersion: 50, os: 100 };
 
-const LIMITS = {
-  name: 100,
-  title: 200,
-  description: 5000,
-  expected: 5000,
-  steps: 5000,
-  version: 50,
-  os: 100,
-};
+// ---------------------------------------------------------------------------
+// Rate limiting (in-memory, per IP)
+// ---------------------------------------------------------------------------
 
-mkdirSync(dirname(DB_PATH), { recursive: true });
-const db = new Database(DB_PATH);
-db.run(`CREATE TABLE IF NOT EXISTS reports (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('feature', 'bug')),
-  title TEXT NOT NULL,
-  description TEXT NOT NULL,
-  expected TEXT,
-  steps TEXT,
-  version TEXT NOT NULL,
-  os TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'Submitted',
-  created_at TEXT NOT NULL
-)`);
+type Bucket = number[];
+const buckets = new Map<string, Bucket>();
 
-function generateId(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let suffix = "";
-  const bytes = crypto.getRandomValues(new Uint8Array(8));
-  for (const b of bytes) suffix += chars[b % chars.length];
-  return `BLK-${suffix}`;
-}
-
-function sanitize(value: unknown, max: number): string | null {
-  if (typeof value !== "string") return null;
-  const cleaned = value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
-  if (cleaned.length === 0 || cleaned.length > max) return null;
-  return cleaned;
-}
-
-const rateBuckets = new Map<string, number[]>();
-
-function rateLimited(ip: string): boolean {
+function rateLimit(key: string, max: number, windowMs: number): boolean {
   const now = Date.now();
-  const bucket = (rateBuckets.get(ip) ?? []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
-  if (bucket.length >= RATE_LIMIT_MAX) {
-    rateBuckets.set(ip, bucket);
+  const hits = (buckets.get(key) ?? []).filter((t) => now - t < windowMs);
+  if (hits.length >= max) {
+    buckets.set(key, hits);
     return true;
   }
-  bucket.push(now);
-  rateBuckets.set(ip, bucket);
+  hits.push(now);
+  buckets.set(key, hits);
   return false;
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
+const reportLimiter = (req: Request, res: Response, next: NextFunction) => {
+  if (rateLimit(`reports:${req.ip}`, 10, 60_000)) {
+    return res.status(429).json({ error: "too many reports, try again later" });
+  }
+  next();
+};
+
+const loginLimiter = (req: Request, res: Response, next: NextFunction) => {
+  if (rateLimit(`login:${req.ip}`, 5, 15 * 60_000)) {
+    return res.status(429).json({ error: "too many login attempts, try again later" });
+  }
+  next();
+};
+
+// ---------------------------------------------------------------------------
+// Sanitization — everything stored is escaped again on render in the admin UI.
+// ---------------------------------------------------------------------------
+
+function clean(value: unknown, max: number): string | null {
+  if (typeof value !== "string") return null;
+  const cleaned = value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
+  return cleaned.length === 0 || cleaned.length > max ? null : cleaned;
 }
 
-Bun.serve({
-  port: PORT,
-  routes: {
-    "/api/health": { GET: () => json({ ok: true }) },
-    "/api/reports": {
-      POST: async (req, server) => {
-        const ip = server.requestIP(req)?.address ?? "unknown";
-        if (rateLimited(ip)) {
-          return json({ error: "too many reports, try again later" }, 429);
-        }
+function cleanOptional(value: unknown, max: number): string | null {
+  if (value == null) return null;
+  return clean(value, max);
+}
 
-        let body: Record<string, unknown>;
-        try {
-          body = (await req.json()) as Record<string, unknown>;
-        } catch {
-          return json({ error: "invalid JSON body" }, 400);
-        }
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
 
-        // Honeypot: bots filling the hidden "website" field get a fake success.
-        if (typeof body.website === "string" && body.website.length > 0) {
-          return json({ id: generateId() }, 201);
-        }
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  const cookieHeader = req.headers.cookie ?? "";
+  const token = cookieHeader
+    .split(";")
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(`${SESSION_COOKIE}=`))
+    ?.slice(SESSION_COOKIE.length + 1);
+  if (!verifySession(token)) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  next();
+}
 
-        const name = sanitize(body.name, LIMITS.name);
-        const title = sanitize(body.title, LIMITS.title);
-        const description = sanitize(body.description, LIMITS.description);
-        const type = body.type === "feature" || body.type === "bug" ? body.type : null;
-        const expected = body.expected == null ? null : sanitize(body.expected, LIMITS.expected);
-        const steps = body.steps == null ? null : sanitize(body.steps, LIMITS.steps);
-        const version = sanitize(body.version, LIMITS.version) ?? "unknown";
-        const os = sanitize(body.os, LIMITS.os) ?? "unknown";
+// ---------------------------------------------------------------------------
 
-        if (!name) return json({ error: "name is required" }, 400);
-        if (!type) return json({ error: "type must be 'feature' or 'bug'" }, 400);
-        if (!title) return json({ error: "title is required" }, 400);
-        if (!description) return json({ error: "description is required" }, 400);
-        if (type === "bug" && !expected) {
-          return json({ error: "expected behavior is required for bug reports" }, 400);
-        }
+const app = express();
+app.disable("x-powered-by");
+if (REQUIRE_HTTPS) {
+  app.set("trust proxy", true);
+  app.use((req, res, next) => {
+    if (!req.secure) {
+      return res.status(403).json({ error: "HTTPS is required" });
+    }
+    next();
+  });
+}
+app.use(express.json({ limit: "64kb" }));
 
-        const id = generateId();
-        db.run(
-          `INSERT INTO reports (id, name, type, title, description, expected, steps, version, os, status, created_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'Submitted', ?10)`,
-          [id, name, type, title, description, expected, steps, version, os, new Date().toISOString()],
-        );
-        return json({ id }, 201);
-      },
-      GET: (req) => {
-        const url = new URL(req.url);
-        const name = sanitize(url.searchParams.get("name"), LIMITS.name);
-        if (!name) return json({ error: "name query parameter is required" }, 400);
-        const rows = db
-          .query(
-            `SELECT id, type, title, status, created_at FROM reports
-             WHERE name = ?1 ORDER BY created_at DESC LIMIT 100`,
-          )
-          .all(name);
-        return json({ reports: rows });
-      },
-    },
-    "/api/reports/:id/status": {
-      // Simple admin hook for future status tracking; requires BLINK_ADMIN_TOKEN.
-      PATCH: async (req) => {
-        const token = process.env.BLINK_ADMIN_TOKEN;
-        if (!token || req.headers.get("authorization") !== `Bearer ${token}`) {
-          return json({ error: "unauthorized" }, 401);
-        }
-        let body: Record<string, unknown>;
-        try {
-          body = (await req.json()) as Record<string, unknown>;
-        } catch {
-          return json({ error: "invalid JSON body" }, 400);
-        }
-        const status = VALID_STATUSES.find((s) => s === body.status);
-        if (!status) return json({ error: "invalid status" }, 400);
-        const result = db.run("UPDATE reports SET status = ?1 WHERE id = ?2", [
-          status,
-          req.params.id,
-        ]);
-        if (result.changes === 0) return json({ error: "report not found" }, 404);
-        return json({ ok: true });
-      },
-    },
-  },
-  fetch: () => json({ error: "not found" }, 404),
+// -- Public ----------------------------------------------------------------
+
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
+
+app.post("/api/reports", reportLimiter, (req, res) => {
+  const body = req.body as Record<string, unknown>;
+
+  const type = body.type === "bug" || body.type === "feature" ? body.type : null;
+  const title = clean(body.title, LIMITS.title);
+  const description = clean(body.description, LIMITS.description);
+  const contactEmail = cleanOptional(body.contactEmail, LIMITS.contactEmail);
+  const appVersion = cleanOptional(body.appVersion, LIMITS.appVersion);
+  const os = cleanOptional(body.os, LIMITS.os);
+
+  if (!type) return res.status(400).json({ error: "type must be 'bug' or 'feature'" });
+  if (!title) return res.status(400).json({ error: "title is required (max 200 chars)" });
+  if (!description) {
+    return res.status(400).json({ error: "description is required (max 5000 chars)" });
+  }
+
+  const id = generateId();
+  const now = new Date().toISOString();
+  db.run(
+    `INSERT INTO reports (id, type, title, description, contact_email, app_version, os, status, created_at, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'new', ?8, ?8)`,
+    [id, type, title, description, contactEmail, appVersion, os, now],
+  );
+  res.status(201).json({ id });
 });
 
-console.log(`Blink feedback server listening on http://localhost:${PORT}`);
+// -- Admin auth --------------------------------------------------------------
+
+app.post("/api/admin/login", loginLimiter, async (req, res) => {
+  if (!ADMIN_USER || !ADMIN_HASH) {
+    return res.status(503).json({ error: "admin account is not configured" });
+  }
+  const { username, password } = req.body as { username?: unknown; password?: unknown };
+  const generic = { error: "invalid credentials" };
+  if (typeof username !== "string" || typeof password !== "string") {
+    return res.status(401).json(generic);
+  }
+  const userMatches =
+    Buffer.from(username).length === Buffer.from(ADMIN_USER).length &&
+    crypto.timingSafeEqual(Buffer.from(username), Buffer.from(ADMIN_USER));
+  let passwordMatches = false;
+  try {
+    passwordMatches = await argon2Verify({ password, hash: ADMIN_HASH });
+  } catch {
+    passwordMatches = false;
+  }
+  if (!userMatches || !passwordMatches) {
+    return res.status(401).json(generic);
+  }
+  res.cookie(SESSION_COOKIE, signSession(ADMIN_USER), {
+    httpOnly: true,
+    secure: REQUIRE_HTTPS,
+    sameSite: "strict",
+    maxAge: 24 * 60 * 60 * 1000,
+  });
+  res.json({ ok: true });
+});
+
+app.post("/api/admin/logout", (_req, res) => {
+  res.clearCookie(SESSION_COOKIE);
+  res.json({ ok: true });
+});
+
+// -- Admin reports -----------------------------------------------------------
+
+app.get("/api/admin/reports", requireAdmin, (req, res) => {
+  const { type, status, q, page } = req.query;
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (type === "bug" || type === "feature") {
+    conditions.push("type = ?");
+    params.push(type);
+  }
+  if (typeof status === "string" && ["new", "in-progress", "resolved", "wont-fix"].includes(status)) {
+    conditions.push("status = ?");
+    params.push(status);
+  }
+  if (typeof q === "string" && q.trim()) {
+    conditions.push("(title LIKE ? OR description LIKE ?)");
+    const pattern = `%${q.trim()}%`;
+    params.push(pattern, pattern);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const pageNum = Math.max(1, Number(page) || 1);
+  const perPage = 25;
+  const total = (db.query(`SELECT COUNT(*) c FROM reports ${where}`).get(...params) as { c: number }).c;
+  const rows = db
+    .query(
+      `SELECT id, type, title, status, created_at FROM reports ${where}
+       ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    )
+    .all(...params, perPage, (pageNum - 1) * perPage);
+  res.json({ reports: rows, total, page: pageNum, perPage });
+});
+
+app.get("/api/admin/reports/:id", requireAdmin, (req, res) => {
+  const row = db.query("SELECT * FROM reports WHERE id = ?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: "report not found" });
+  res.json(row);
+});
+
+app.patch("/api/admin/reports/:id", requireAdmin, (req, res) => {
+  const { status, adminNotes } = req.body as { status?: unknown; adminNotes?: unknown };
+  const updates: string[] = [];
+  const params: (string | null)[] = [];
+  if (status !== undefined) {
+    if (typeof status !== "string" || !["new", "in-progress", "resolved", "wont-fix"].includes(status)) {
+      return res.status(400).json({ error: "invalid status" });
+    }
+    updates.push("status = ?");
+    params.push(status);
+  }
+  if (adminNotes !== undefined) {
+    updates.push("admin_notes = ?");
+    params.push(cleanOptional(adminNotes, 5000));
+  }
+  if (updates.length === 0) return res.status(400).json({ error: "nothing to update" });
+  updates.push("updated_at = ?");
+  params.push(new Date().toISOString());
+  params.push(req.params.id);
+  const result = db.run(`UPDATE reports SET ${updates.join(", ")} WHERE id = ?`, params);
+  if (result.changes === 0) return res.status(404).json({ error: "report not found" });
+  res.json({ ok: true });
+});
+
+app.delete("/api/admin/reports/:id", requireAdmin, (req, res) => {
+  const result = db.run("DELETE FROM reports WHERE id = ?", [req.params.id]);
+  if (result.changes === 0) return res.status(404).json({ error: "report not found" });
+  res.json({ ok: true });
+});
+
+// -- Admin webpage (static, same service) -------------------------------------
+
+app.use("/admin", express.static(join(import.meta.dir, "admin")));
+app.get("/admin", (_req, res) => res.redirect("/admin/"));
+
+app.listen(PORT, () => {
+  console.log(`Blink feedback server listening on http://localhost:${PORT}`);
+  console.log(`Admin panel: http://localhost:${PORT}/admin/`);
+  if (!ADMIN_USER || !ADMIN_HASH) {
+    console.warn("WARNING: admin not configured — set BLINK_ADMIN_USER and BLINK_ADMIN_HASH (run: bun server/setup-admin.ts)");
+  }
+});

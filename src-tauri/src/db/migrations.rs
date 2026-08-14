@@ -289,6 +289,29 @@ pub const MIGRATIONS: &[Migration] = &[
         );
     "#,
     },
+    Migration {
+        version: 12,
+        name: "pending feedback reports queue",
+        sql: r#"
+        CREATE TABLE IF NOT EXISTS pending_reports (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            type           TEXT NOT NULL CHECK (type IN ('feature', 'bug')),
+            title          TEXT NOT NULL,
+            description    TEXT NOT NULL,
+            contact_email  TEXT,
+            app_version    TEXT,
+            os             TEXT,
+            status         TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'sent', 'failed')),
+            server_id      TEXT,
+            last_error     TEXT,
+            attempts       INTEGER NOT NULL DEFAULT 0,
+            next_retry_at  TEXT,
+            created_at     TEXT NOT NULL,
+            updated_at     TEXT NOT NULL
+        );
+    "#,
+    },
 ];
 
 pub fn current_version(conn: &Connection) -> Result<u32, String> {

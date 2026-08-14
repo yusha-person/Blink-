@@ -1,39 +1,32 @@
 import { useCallback, useEffect, useState } from "react";
-import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  submitFeedback,
-  BLINK_API_URL,
-  type FeedbackType,
-} from "../config/feedback";
 import { CheckIcon, FeedbackIcon } from "../components/icons";
 import { formatFullTimestamp } from "../utils/timestamps";
 
 type Step = "choose" | "form" | "success";
-type FeedbackReport = {
-  id: string;
+type FeedbackType = "feature" | "bug";
+
+type SubmitOutcome = { status: "sent" | "queued"; id: string };
+type QueuedReport = {
+  id: number;
   reportType: string;
   title: string;
-  status: string;
+  status: "pending" | "sent" | "failed";
+  serverId: string | null;
+  attempts: number;
   createdAt: string;
 };
 
 const inputClass =
   "w-full select-text rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-text outline-none transition-colors placeholder:text-muted focus:border-accent/50";
 
-const STATUS_STYLES: Record<string, string> = {
-  Submitted: "border-border text-muted",
-  Reviewing: "border-accent/40 bg-accent/10 text-accent",
-  Planned: "border-warning/40 bg-warning/10 text-warning",
-  "In Progress": "border-warning/40 bg-warning/10 text-warning",
-  Completed: "border-success/40 bg-success/10 text-success",
-  Closed: "border-border text-muted",
+const QUEUE_STYLES: Record<string, string> = {
+  sent: "border-success/40 bg-success/10 text-success",
+  pending: "border-warning/40 bg-warning/10 text-warning",
+  failed: "border-danger/40 bg-danger/10 text-danger",
 };
 
-function osLabel(): string {
-  const p = navigator.platform ?? "unknown";
-  return p.replace(/x86_64|x64/i, "64-bit");
-}
+const RETRY_INTERVAL_MS = 60_000;
 
 export default function FeedbackPage() {
   const [step, setStep] = useState<Step>("choose");
@@ -43,58 +36,39 @@ export default function FeedbackPage() {
   const [description, setDescription] = useState("");
   const [expected, setExpected] = useState("");
   const [steps, setSteps] = useState("");
+  const [email, setEmail] = useState("");
+  const [includeDeviceInfo, setIncludeDeviceInfo] = useState(false);
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [offline, setOffline] = useState(false);
-  const [reportId, setReportId] = useState<string | null>(null);
-  const [history, setHistory] = useState<FeedbackReport[]>([]);
-  const [version, setVersion] = useState("0.1.0");
+  const [outcome, setOutcome] = useState<SubmitOutcome | null>(null);
+  const [queue, setQueue] = useState<QueuedReport[]>([]);
 
-  useEffect(() => {
-    void getVersion()
-      .then(setVersion)
-      .catch(() => undefined);
-  }, []);
-
-  const loadHistory = useCallback(async () => {
+  const loadQueue = useCallback(async () => {
     try {
-      const reports = await invoke<FeedbackReport[]>("list_feedback_reports");
-      setHistory(reports);
+      setQueue(await invoke<QueuedReport[]>("list_queued_reports"));
     } catch {
-      // history is best-effort
+      // queue display is best-effort
     }
   }, []);
 
-  const refreshStatuses = useCallback(
-    async (reportName: string) => {
-      try {
-        const response = await fetch(
-          `${BLINK_API_URL}/api/reports?name=${encodeURIComponent(reportName)}`,
-        );
-        if (!response.ok) return;
-        const body = (await response.json()) as {
-          reports?: { id: string; status: string }[];
-        };
-        for (const remote of body.reports ?? []) {
-          await invoke("update_feedback_status", { id: remote.id, status: remote.status });
-        }
-        await loadHistory();
-      } catch {
-        // offline — keep cached statuses
-      }
-    },
-    [loadHistory],
-  );
+  const retryQueue = useCallback(async () => {
+    try {
+      const summary = await invoke<{ sent: number }>("retry_pending_reports");
+      if (summary.sent > 0) await loadQueue();
+    } catch {
+      // offline — reports stay queued
+    }
+  }, [loadQueue]);
 
   useEffect(() => {
-    void loadHistory();
+    void loadQueue();
+    void retryQueue();
     void invoke<string | null>("get_setting", { key: "feedback.name" }).then((stored) => {
-      if (stored) {
-        setName(stored);
-        void refreshStatuses(stored);
-      }
+      if (stored) setName(stored);
     });
-  }, [loadHistory, refreshStatuses]);
+    const interval = setInterval(() => void retryQueue(), RETRY_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [loadQueue, retryQueue]);
 
   const missing: string[] = [];
   if (!name.trim()) missing.push("name");
@@ -110,42 +84,38 @@ export default function FeedbackPage() {
     setDescription("");
     setExpected("");
     setSteps("");
+    setEmail("");
+    setIncludeDeviceInfo(false);
     setSubmitError(null);
-    setOffline(false);
-    setReportId(null);
+    setOutcome(null);
   };
 
   const submit = async () => {
     if (!canSubmit || !type) return;
     setBusy(true);
     setSubmitError(null);
-    setOffline(false);
     try {
-      const result = await submitFeedback({
-        name: name.trim(),
-        type,
-        title: title.trim(),
-        description: description.trim(),
+      const body = [
+        `Report from ${name.trim()}`,
+        "",
+        description.trim(),
         ...(type === "bug"
-          ? { expected: expected.trim(), steps: steps.trim() || undefined }
-          : {}),
-        version,
-        os: osLabel(),
+          ? ["", "Expected behavior:", expected.trim(), ...(steps.trim() ? ["", "Steps to reproduce:", steps.trim()] : [])]
+          : []),
+      ].join("\n");
+      const result = await invoke<SubmitOutcome>("submit_feedback_report", {
+        reportType: type,
+        title: title.trim(),
+        description: body,
+        contactEmail: email.trim() || null,
+        includeDeviceInfo,
       });
-      if (result.ok) {
-        await invoke("save_feedback_report", {
-          id: result.id,
-          reportType: type,
-          title: title.trim(),
-        });
-        await invoke("set_setting", { key: "feedback.name", value: name.trim() });
-        setReportId(result.id);
-        setStep("success");
-        void loadHistory();
-      } else {
-        setOffline(result.offline);
-        setSubmitError(result.message);
-      }
+      await invoke("set_setting", { key: "feedback.name", value: name.trim() });
+      setOutcome(result);
+      setStep("success");
+      void loadQueue();
+    } catch (e) {
+      setSubmitError(String(e));
     } finally {
       setBusy(false);
     }
@@ -156,8 +126,8 @@ export default function FeedbackPage() {
       <header className="flex flex-col gap-1">
         <h2 className="text-2xl font-semibold text-text">Features / Bugs</h2>
         <p className="text-sm text-muted">
-          Request features and report bugs. Only your name and the report are sent —
-          notes, tasks, and habits never leave this device.
+          Request features and report bugs. Only your name and what you write here are
+          sent — notes, tasks, and habits never leave this device.
         </p>
       </header>
 
@@ -188,11 +158,7 @@ export default function FeedbackPage() {
             <h3 className="text-sm font-medium text-text">
               {type === "feature" ? "Feature Request" : "Bug Report"}
             </h3>
-            <button
-              type="button"
-              onClick={reset}
-              className="text-xs text-muted hover:text-text"
-            >
+            <button type="button" onClick={reset} className="text-xs text-muted hover:text-text">
               Back
             </button>
           </div>
@@ -212,6 +178,7 @@ export default function FeedbackPage() {
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
+              maxLength={200}
               className={inputClass}
             />
           </label>
@@ -249,40 +216,67 @@ export default function FeedbackPage() {
             </>
           )}
 
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-muted">Contact email (optional)</span>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Only if you'd like a follow-up"
+              className={inputClass}
+            />
+          </label>
+          <label className="flex items-center gap-2 text-xs text-text">
+            <input
+              type="checkbox"
+              checked={includeDeviceInfo}
+              onChange={(e) => setIncludeDeviceInfo(e.target.checked)}
+              className="accent-accent"
+            />
+            Include app version and OS (helps with bug triage)
+          </label>
+
           {submitError && (
-            <div className="rounded-lg border border-danger/40 bg-danger/10 p-3">
-              {offline && (
-                <p className="text-xs font-semibold text-danger">You're currently offline.</p>
-              )}
-              <p className="text-xs text-danger">
-                Your report could not be submitted{offline ? "" : `: ${submitError}`}.
-              </p>
-            </div>
+            <p className="rounded-lg border border-danger/40 bg-danger/10 p-3 text-xs text-danger">
+              {submitError}
+            </p>
           )}
 
-          <div className="mt-1 flex justify-end">
+          <p className="text-[11px] leading-relaxed text-muted">
+            Submitting a report sends this information to our server over the internet.
+            If you're offline, the report is saved locally and sent automatically when
+            you're back online.
+          </p>
+
+          <div className="flex justify-end">
             <button
               type="button"
               onClick={() => void submit()}
               disabled={!canSubmit}
               className="rounded-lg border border-accent/50 bg-accent/15 px-4 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent/25 disabled:opacity-60"
             >
-              {busy ? "Submitting…" : offline ? "Retry" : type === "feature" ? "Submit Feature" : "Submit Bug"}
+              {busy ? "Submitting…" : type === "feature" ? "Submit Feature" : "Submit Bug"}
             </button>
           </div>
         </section>
       )}
 
-      {step === "success" && (
+      {step === "success" && outcome && (
         <section className="glass flex max-w-lg flex-col items-center gap-3 p-8 text-center">
           <span className="flex h-12 w-12 items-center justify-center rounded-full border border-success/40 bg-success/15 text-success">
             <CheckIcon width={22} height={22} />
           </span>
-          <h3 className="text-base font-semibold text-text">Submitted!</h3>
-          <p className="text-sm text-muted">Thank you for helping improve Blink.</p>
+          <h3 className="text-base font-semibold text-text">
+            {outcome.status === "sent" ? "Submitted!" : "Queued"}
+          </h3>
+          <p className="text-sm text-muted">
+            {outcome.status === "sent"
+              ? "Thank you for helping improve Blink."
+              : "You're offline or the server is unreachable — your report is saved locally and will be sent automatically."}
+          </p>
           <p className="text-xs text-muted">
             Report ID:{" "}
-            <span className="select-text font-mono font-semibold text-accent">{reportId}</span>
+            <span className="select-text font-mono font-semibold text-accent">{outcome.id}</span>
           </p>
           <button
             type="button"
@@ -295,35 +289,24 @@ export default function FeedbackPage() {
       )}
 
       <section className="glass flex max-w-lg flex-col gap-2 p-5">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-text">Your Reports</h3>
-          {name.trim() && (
-            <button
-              type="button"
-              onClick={() => void refreshStatuses(name.trim())}
-              className="text-xs text-accent hover:underline"
-            >
-              Refresh statuses
-            </button>
-          )}
-        </div>
-        {history.length === 0 ? (
+        <h3 className="text-sm font-medium text-text">Your Reports</h3>
+        {queue.length === 0 ? (
           <p className="text-sm text-muted">No reports submitted yet.</p>
         ) : (
           <ul className="flex flex-col divide-y divide-border">
-            {history.map((report) => (
+            {queue.map((report) => (
               <li key={report.id} className="flex items-center gap-3 py-2">
                 <FeedbackIcon width={14} height={14} className="shrink-0 text-muted" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm text-text">{report.title}</p>
                   <p className="text-[11px] text-muted">
-                    <span className="font-mono">{report.id}</span> ·{" "}
+                    <span className="font-mono">{report.serverId ?? `#${report.id}`}</span> ·{" "}
                     {report.reportType === "feature" ? "Feature" : "Bug"} ·{" "}
                     {formatFullTimestamp(report.createdAt)}
                   </p>
                 </div>
                 <span
-                  className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${STATUS_STYLES[report.status] ?? STATUS_STYLES.Submitted}`}
+                  className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium capitalize ${QUEUE_STYLES[report.status]}`}
                 >
                   {report.status}
                 </span>
@@ -331,7 +314,6 @@ export default function FeedbackPage() {
             ))}
           </ul>
         )}
-        <p className="text-[10px] text-muted">Server: {BLINK_API_URL}</p>
       </section>
     </div>
   );
