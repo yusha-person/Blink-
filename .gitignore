@@ -3,4 +3,8 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/gen/
+
 server/feedback.db*
+server/.env
+.env
+.env.*
