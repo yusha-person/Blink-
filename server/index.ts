@@ -241,6 +241,19 @@ app.delete("/api/admin/reports/:id", requireAdmin, (req, res) => {
 app.use("/admin", express.static(join(import.meta.dir, "admin")));
 app.get("/admin", (_req, res) => res.redirect("/admin/"));
 
+// -- Blink web app (Vite build output) ----------------------------------------
+
+const DIST_DIR = join(import.meta.dir, "..", "dist");
+app.use(express.static(DIST_DIR));
+// SPA fallback: anything that isn't /api/* or /admin/* gets the app shell.
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/") || req.path.startsWith("/admin")) return next();
+  if (req.method !== "GET") return next();
+  res.sendFile(join(DIST_DIR, "index.html"), (err) => {
+    if (err) next();
+  });
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Blink feedback server listening on port ${PORT}`);
   console.log(`Admin panel: /admin/`);
