@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { SESSION_COOKIE, signSession, verifySession } from "./auth";
 import { db, generateId } from "./db";
 
-const PORT = Number(process.env.BLINK_API_PORT ?? 4789);
+const PORT = Number(process.env.PORT ?? process.env.BLINK_API_PORT ?? 4789);
 const ADMIN_USER = process.env.BLINK_ADMIN_USER;
 const ADMIN_HASH = process.env.BLINK_ADMIN_HASH;
 const REQUIRE_HTTPS = process.env.BLINK_REQUIRE_HTTPS === "1";
@@ -232,9 +232,9 @@ app.delete("/api/admin/reports/:id", requireAdmin, (req, res) => {
 app.use("/admin", express.static(join(import.meta.dir, "admin")));
 app.get("/admin", (_req, res) => res.redirect("/admin/"));
 
-app.listen(PORT, () => {
-  console.log(`Blink feedback server listening on http://localhost:${PORT}`);
-  console.log(`Admin panel: http://localhost:${PORT}/admin/`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Blink feedback server listening on port ${PORT}`);
+  console.log(`Admin panel: /admin/`);
   if (!ADMIN_USER || !ADMIN_HASH) {
     console.warn("WARNING: admin not configured — set BLINK_ADMIN_USER and BLINK_ADMIN_HASH (run: bun server/setup-admin.ts)");
   }
