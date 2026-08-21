@@ -1,7 +1,30 @@
 import { useCallback, useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { CheckIcon, FeedbackIcon } from "../components/icons";
-import { formatFullTimestamp } from "../utils/timestamps";
+import { formatFullTimestamp, localDateString } from "../utils/timestamps";
+
+const WEB_API_URL =
+  (import.meta.env.BLINK_API_URL as string | undefined) ??
+  "https://blink-production-e083.up.railway.app";
+
+const WEB_QUEUE_KEY = "blink.feedback.reports";
+const NAME_KEY = "blink.feedback.name";
+
+type WebReport = {
+  id: string;
+  reportType: string;
+  title: string;
+  status: "sent" | "failed";
+  createdAt: string;
+};
+
+function readWebQueue(): WebReport[] {
+  try {
+    return JSON.parse(localStorage.getItem(WEB_QUEUE_KEY) ?? "[]") as WebReport[];
+  } catch {
+    return [];
+  }
+}
 
 type Step = "choose" | "form" | "success";
 type FeedbackType = "feature" | "bug";
@@ -44,6 +67,20 @@ export default function FeedbackPage() {
   const [queue, setQueue] = useState<QueuedReport[]>([]);
 
   const loadQueue = useCallback(async () => {
+    if (!isTauri()) {
+      setQueue(
+        readWebQueue().map((r) => ({
+          id: 0,
+          reportType: r.reportType,
+          title: r.title,
+          status: r.status,
+          serverId: r.id,
+          attempts: 1,
+          createdAt: r.createdAt,
+        })),
+      );
+      return;
+    }
     try {
       setQueue(await invoke<QueuedReport[]>("list_queued_reports"));
     } catch {
@@ -52,6 +89,7 @@ export default function FeedbackPage() {
   }, []);
 
   const retryQueue = useCallback(async () => {
+    if (!isTauri()) return;
     try {
       const summary = await invoke<{ sent: number }>("retry_pending_reports");
       if (summary.sent > 0) await loadQueue();
@@ -63,9 +101,14 @@ export default function FeedbackPage() {
   useEffect(() => {
     void loadQueue();
     void retryQueue();
-    void invoke<string | null>("get_setting", { key: "feedback.name" }).then((stored) => {
+    if (isTauri()) {
+      void invoke<string | null>("get_setting", { key: "feedback.name" }).then((stored) => {
+        if (stored) setName(stored);
+      });
+    } else {
+      const stored = localStorage.getItem(NAME_KEY);
       if (stored) setName(stored);
-    });
+    }
     const interval = setInterval(() => void retryQueue(), RETRY_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [loadQueue, retryQueue]);
@@ -103,15 +146,57 @@ export default function FeedbackPage() {
           ? ["", "Expected behavior:", expected.trim(), ...(steps.trim() ? ["", "Steps to reproduce:", steps.trim()] : [])]
           : []),
       ].join("\n");
-      const result = await invoke<SubmitOutcome>("submit_feedback_report", {
-        reportType: type,
-        title: title.trim(),
-        description: body,
-        contactEmail: email.trim() || null,
-        includeDeviceInfo,
-      });
-      await invoke("set_setting", { key: "feedback.name", value: name.trim() });
-      setOutcome(result);
+
+      if (isTauri()) {
+        const result = await invoke<SubmitOutcome>("submit_feedback_report", {
+          reportType: type,
+          title: title.trim(),
+          description: body,
+          contactEmail: email.trim() || null,
+          includeDeviceInfo,
+        });
+        await invoke("set_setting", { key: "feedback.name", value: name.trim() });
+        setOutcome(result);
+      } else {
+        const response = await fetch(`${WEB_API_URL}/api/reports`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type,
+            title: title.trim(),
+            description: body,
+            ...(email.trim() ? { contactEmail: email.trim() } : {}),
+            ...(includeDeviceInfo ? { appVersion: "web", os: navigator.platform } : {}),
+          }),
+        });
+        const responseBody = (await response.json().catch(() => null)) as
+          | { id?: string; error?: string }
+          | null;
+        const reports = readWebQueue();
+        if (response.ok && responseBody?.id) {
+          reports.unshift({
+            id: responseBody.id,
+            reportType: type,
+            title: title.trim(),
+            status: "sent",
+            createdAt: `${localDateString()} 00:00:00`,
+          });
+          setOutcome({ status: "sent", id: responseBody.id });
+        } else {
+          const message = responseBody?.error ?? "could not reach the Blink server";
+          reports.unshift({
+            id: `local-${Date.now()}`,
+            reportType: type,
+            title: title.trim(),
+            status: "failed",
+            createdAt: `${localDateString()} 00:00:00`,
+          });
+          setOutcome({ status: "queued", id: `local-${Date.now()}` });
+          setSubmitError(message);
+        }
+        localStorage.setItem(WEB_QUEUE_KEY, JSON.stringify(reports.slice(0, 50)));
+        localStorage.setItem(NAME_KEY, name.trim());
+      }
       setStep("success");
       void loadQueue();
     } catch (e) {
